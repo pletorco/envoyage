@@ -72,6 +72,76 @@ go build ./cmd/envoyage
 
 The current Envoyage version is `0.2.0`.
 
+## Quickstart
+
+This walkthrough uses the PostgreSQL example. It keeps non-secret settings in
+`.env`, encrypts example-only passwords from `.secrets.env` into `.env.age`,
+then runs Docker Compose through Envoyage.
+
+Build Envoyage from the repository root:
+
+```bash
+go build -o envoyage ./cmd/envoyage
+```
+
+Move into the example:
+
+```bash
+cd examples/postgresql
+```
+
+Generate a local age identity for the example:
+
+```bash
+../../envoyage keygen --out age-key.txt
+```
+
+Encrypt `.secrets.env` to `.env.age`:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt ../../envoyage encrypt
+```
+
+Preview the Compose configuration:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt ../../envoyage compose -f compose.yaml config
+```
+
+Start the services:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt ../../envoyage compose -f compose.yaml up -d
+```
+
+Open pgAdmin:
+
+```text
+http://localhost:8080
+```
+
+Use `PGADMIN_DEFAULT_EMAIL` from `.env` and `PGADMIN_DEFAULT_PASSWORD` from
+`.secrets.env`.
+
+When you are done:
+
+```bash
+docker compose -f compose.yaml down -v
+```
+
+The committed `.secrets.env` in `examples/` is intentionally included for a
+copy-and-run demo. In real projects, do not commit plaintext `.secrets.env`;
+keep `.env.age` and the age identity distribution under your own deployment
+policy.
+
+Optional Docker-shaped flow:
+
+```bash
+../../envoyage shim install --bin-dir ./bin
+PATH="$PWD/bin:$PATH" ENVOYAGE_DOCKER_BIN=/usr/bin/docker docker compose -f compose.yaml config
+../../envoyage shim uninstall --bin-dir ./bin
+```
+
 ## Create `.env.age`
 
 Envoyage uses the age encryption format through the `filippo.io/age` Go
