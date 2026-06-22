@@ -31,17 +31,17 @@ func EncryptFile(opts EncryptOptions) error {
 		return fmt.Errorf("--out is required")
 	}
 
+	plaintext, err := os.ReadFile(opts.InputPath)
+	if err != nil {
+		return fmt.Errorf("read input env file %s: %w", opts.InputPath, err)
+	}
+
 	recipients, err := loadRecipients(opts.Recipients, opts.IdentityPaths)
 	if err != nil {
 		return err
 	}
 	if len(recipients) == 0 {
 		return fmt.Errorf("at least one --recipient or --identity is required")
-	}
-
-	plaintext, err := os.ReadFile(opts.InputPath)
-	if err != nil {
-		return fmt.Errorf("read input env file %s: %w", opts.InputPath, err)
 	}
 
 	var encrypted bytes.Buffer

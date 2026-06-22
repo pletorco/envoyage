@@ -325,6 +325,12 @@ func TestEncryptFileWithRecipientAndOverwriteProtection(t *testing.T) {
 }
 
 func TestEncryptFileValidatesRequiredInputs(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(inputPath, []byte("TOKEN=secret-token\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(input) error = %v", err)
+	}
+
 	tests := []struct {
 		name string
 		opts EncryptOptions
@@ -342,12 +348,12 @@ func TestEncryptFileValidatesRequiredInputs(t *testing.T) {
 		},
 		{
 			name: "missing recipient",
-			opts: EncryptOptions{InputPath: ".env", OutputPath: ".env.age"},
+			opts: EncryptOptions{InputPath: inputPath, OutputPath: filepath.Join(dir, "missing-recipient.env.age")},
 			want: "at least one --recipient or --identity is required",
 		},
 		{
 			name: "invalid recipient",
-			opts: EncryptOptions{InputPath: ".env", OutputPath: ".env.age", Recipients: []string{"not-a-recipient"}},
+			opts: EncryptOptions{InputPath: inputPath, OutputPath: filepath.Join(dir, "invalid-recipient.env.age"), Recipients: []string{"not-a-recipient"}},
 			want: "parse recipient",
 		},
 	}
