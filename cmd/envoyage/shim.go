@@ -18,6 +18,11 @@ var (
 	userHomeDir       = os.UserHomeDir
 )
 
+const (
+	shimBinDirFlag  = "bin-dir"
+	shimBinDirUsage = "directory where the docker shim symlink is installed"
+)
+
 func runShim(args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printShimUsage(stdout)
@@ -41,7 +46,7 @@ func runShimInstall(args []string, stdout io.Writer) error {
 	var force bool
 
 	flags := flag.NewFlagSet("shim install", flag.ContinueOnError)
-	flags.StringVar(&binDir, "bin-dir", defaultShimBinDir, "directory where the docker shim symlink is installed")
+	flags.StringVar(&binDir, shimBinDirFlag, defaultShimBinDir, shimBinDirUsage)
 	flags.BoolVar(&force, "force", false, "recreate an existing Envoyage-managed shim symlink")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -63,26 +68,12 @@ func runShimInstall(args []string, stdout io.Writer) error {
 		return fmt.Errorf("create shim directory %s: %w", filepath.Dir(shimPath), err)
 	}
 
-	installed, err := isEnvoyageShim(shimPath, target)
+	shouldInstall, err := prepareShimInstall(shimPath, target, force, stdout)
 	if err != nil {
 		return err
 	}
-	if installed {
-		if force {
-			if err := os.Remove(shimPath); err != nil {
-				return fmt.Errorf("remove existing shim %s: %w", shimPath, err)
-			}
-		} else {
-			fmt.Fprintf(stdout, "shim already installed: %s -> %s\n", shimPath, target)
-			printShimActivation(stdout, filepath.Dir(shimPath), "")
-			return nil
-		}
-	} else {
-		if _, err := os.Lstat(shimPath); err == nil {
-			return fmt.Errorf("refusing to overwrite non-Envoyage docker at %s", shimPath)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inspect shim path %s: %w", shimPath, err)
-		}
+	if !shouldInstall {
+		return nil
 	}
 
 	if err := os.Symlink(target, shimPath); err != nil {
@@ -94,11 +85,38 @@ func runShimInstall(args []string, stdout io.Writer) error {
 	return nil
 }
 
+func prepareShimInstall(shimPath string, target string, force bool, stdout io.Writer) (bool, error) {
+	installed, err := isEnvoyageShim(shimPath, target)
+	if err != nil {
+		return false, err
+	}
+	if installed {
+		if force {
+			if err := os.Remove(shimPath); err != nil {
+				return false, fmt.Errorf("remove existing shim %s: %w", shimPath, err)
+			}
+		} else {
+			fmt.Fprintf(stdout, "shim already installed: %s -> %s\n", shimPath, target)
+			printShimActivation(stdout, filepath.Dir(shimPath), "")
+			return false, nil
+		}
+		return true, nil
+	}
+
+	if _, err := os.Lstat(shimPath); err == nil {
+		return false, fmt.Errorf("refusing to overwrite non-Envoyage docker at %s", shimPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("inspect shim path %s: %w", shimPath, err)
+	}
+
+	return true, nil
+}
+
 func runShimUninstall(args []string, stdout io.Writer) error {
 	var binDir string
 
 	flags := flag.NewFlagSet("shim uninstall", flag.ContinueOnError)
-	flags.StringVar(&binDir, "bin-dir", defaultShimBinDir, "directory where the docker shim symlink is installed")
+	flags.StringVar(&binDir, shimBinDirFlag, defaultShimBinDir, shimBinDirUsage)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -138,7 +156,7 @@ func runShimStatus(args []string, stdout io.Writer) error {
 	var binDir string
 
 	flags := flag.NewFlagSet("shim status", flag.ContinueOnError)
-	flags.StringVar(&binDir, "bin-dir", defaultShimBinDir, "directory where the docker shim symlink is installed")
+	flags.StringVar(&binDir, shimBinDirFlag, defaultShimBinDir, shimBinDirUsage)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -159,6 +177,16 @@ func runShimStatus(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	printShimStatus(stdout, shimPath, target, installed)
+	printDockerResolution(stdout, shimPath)
+
+	if installed {
+		printShimActivation(stdout, filepath.Dir(shimPath), os.Getenv("ENVOYAGE_DOCKER_BIN"))
+	}
+	return nil
+}
+
+func printShimStatus(stdout io.Writer, shimPath string, target string, installed bool) {
 	fmt.Fprintf(stdout, "shim path: %s\n", shimPath)
 	fmt.Fprintf(stdout, "envoyage target: %s\n", target)
 	if installed {
@@ -170,7 +198,9 @@ func runShimStatus(args []string, stdout io.Writer) error {
 	if linkTarget, ok := readSymlinkTarget(shimPath); ok {
 		fmt.Fprintf(stdout, "shim target: %s\n", linkTarget)
 	}
+}
 
+func printDockerResolution(stdout io.Writer, shimPath string) {
 	if pathDocker, err := exec.LookPath("docker"); err == nil {
 		fmt.Fprintf(stdout, "PATH docker: %s\n", pathDocker)
 	} else {
@@ -188,11 +218,6 @@ func runShimStatus(args []string, stdout io.Writer) error {
 	} else {
 		fmt.Fprintf(stdout, "ENVOYAGE_DOCKER_BIN: %s\n", dockerBin)
 	}
-
-	if installed {
-		printShimActivation(stdout, filepath.Dir(shimPath), dockerBin)
-	}
-	return nil
 }
 
 func dockerShimPath(binDir string) (string, error) {
