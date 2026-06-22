@@ -1,5 +1,7 @@
 # Envoyage
 
+Pronunciation: `/ˈɛn.vɔɪ.ɪdʒ/`
+
 Envoyage is a lightweight encrypted environment-variable loader for Docker Compose.
 It decrypts `.env.age` files in memory, parses the decrypted dotenv content, and
 passes the resulting variables to `docker compose` as child-process environment
