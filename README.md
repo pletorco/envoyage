@@ -70,7 +70,7 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The initial Envoyage version is `0.1.0`.
+The current Envoyage version is `0.2.0`.
 
 ## Create `.env.age`
 
@@ -312,9 +312,7 @@ docker version
 Create a user-local shim:
 
 ```bash
-mkdir -p ~/.local/lib/envoyage ~/.local/bin
-cp ./envoyage ~/.local/lib/envoyage/envoyage
-ln -sf ~/.local/lib/envoyage/envoyage ~/.local/bin/docker
+envoyage shim install
 ```
 
 Put `~/.local/bin` before the real Docker directory in `PATH`, and point
@@ -323,6 +321,12 @@ Envoyage at the real Docker binary:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 export ENVOYAGE_DOCKER_BIN=/usr/bin/docker
+```
+
+Check the current shim state:
+
+```bash
+envoyage shim status
 ```
 
 Then Compose can be run with the Docker-shaped command:
@@ -334,6 +338,16 @@ docker compose --env-file .env.age up -d
 If `ENVOYAGE_DOCKER_BIN` is not set, shim mode searches `PATH` for the next
 executable named `docker` that is not the Envoyage shim itself. Setting
 `ENVOYAGE_DOCKER_BIN` explicitly is recommended because it avoids ambiguity.
+
+Remove the shim when you no longer want Docker-shaped interception:
+
+```bash
+envoyage shim uninstall
+```
+
+`envoyage shim install` refuses to overwrite an existing non-Envoyage `docker`
+file, even with `--force`. `--force` only recreates a shim symlink that already
+points at the current Envoyage binary.
 
 ## Security Model and Limits
 
@@ -441,8 +455,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -450,8 +464,8 @@ and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
 files to GitHub Releases.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.1.0` produces:
+`envoyage version`. For example, `v0.2.0` produces:
 
 ```text
-envoyage 0.1.0
+envoyage 0.2.0
 ```

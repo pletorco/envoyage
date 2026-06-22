@@ -39,7 +39,7 @@ func NewShimRunner(invokedPath string) (Runner, error) {
 		return runner, nil
 	}
 
-	dockerBin, err := findRealDockerBin(invokedPath)
+	dockerBin, err := FindRealDockerBin(invokedPath)
 	if err != nil {
 		return Runner{}, err
 	}
@@ -109,7 +109,7 @@ func RunComposeWithRunner(ctx context.Context, args []string, runner Runner) err
 	return runner.Run(ctx, opts.ComposeArgs, env)
 }
 
-func findRealDockerBin(invokedPath string) (string, error) {
+func FindRealDockerBin(invokedPath string) (string, error) {
 	name := "docker"
 	if runtime.GOOS == "windows" {
 		name = "docker.exe"

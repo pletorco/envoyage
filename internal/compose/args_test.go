@@ -482,6 +482,52 @@ printf '],"token":"%s"}' "$TOKEN" >> "$CAPTURE"
 	}
 }
 
+func TestRunComposeWithRunnerUsesProvidedRunner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	capturePath := filepath.Join(dir, "capture.json")
+	scriptPath := filepath.Join(dir, "docker")
+
+	if err := os.WriteFile(envPath, []byte("TOKEN=provided-runner\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(scriptPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(script) error = %v", err)
+	}
+
+	runner := Runner{
+		DockerBin: scriptPath,
+		Env:       []string{"CAPTURE=" + capturePath},
+		Stdout:    &bytes.Buffer{},
+		Stderr:    &bytes.Buffer{},
+	}
+	if err := RunComposeWithRunner(context.Background(), []string{"--env-file", envPath, "config"}, runner); err != nil {
+		t.Fatalf("RunComposeWithRunner() error = %v", err)
+	}
+
+	data, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatalf("ReadFile(capture) error = %v", err)
+	}
+	var capture struct {
+		Args  []string `json:"args"`
+		Token string   `json:"token"`
+	}
+	if err := json.Unmarshal(data, &capture); err != nil {
+		t.Fatalf("Unmarshal(capture) error = %v; data=%s", err, data)
+	}
+	if strings.Join(capture.Args, "\x00") != strings.Join([]string{"compose", "config"}, "\x00") {
+		t.Fatalf("args = %#v, want compose config", capture.Args)
+	}
+	if capture.Token != "provided-runner" {
+		t.Fatalf("TOKEN = %q, want provided-runner", capture.Token)
+	}
+}
+
 func TestRunComposeAutomaticallyLoadsDefaultEnvFiles(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell helper is POSIX-specific")
@@ -618,12 +664,12 @@ func TestFindRealDockerBinSkipsShimPath(t *testing.T) {
 
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+realDir)
 
-	got, err := findRealDockerBin(shimPath)
+	got, err := FindRealDockerBin(shimPath)
 	if err != nil {
-		t.Fatalf("findRealDockerBin() error = %v", err)
+		t.Fatalf("FindRealDockerBin() error = %v", err)
 	}
 	if got != realPath {
-		t.Fatalf("findRealDockerBin() = %q, want %q", got, realPath)
+		t.Fatalf("FindRealDockerBin() = %q, want %q", got, realPath)
 	}
 }
 
@@ -640,9 +686,9 @@ func TestFindRealDockerBinReportsMissingRealDocker(t *testing.T) {
 
 	t.Setenv("PATH", dir)
 
-	_, err := findRealDockerBin(shimPath)
+	_, err := FindRealDockerBin(shimPath)
 	if err == nil {
-		t.Fatal("findRealDockerBin() error = nil, want missing real docker error")
+		t.Fatal("FindRealDockerBin() error = nil, want missing real docker error")
 	}
 	if !strings.Contains(err.Error(), "ENVOYAGE_DOCKER_BIN") {
 		t.Fatalf("error = %q, want ENVOYAGE_DOCKER_BIN guidance", err.Error())
@@ -679,6 +725,18 @@ func TestNewRunnerDefaultsDockerBin(t *testing.T) {
 	}
 }
 
+func TestNewShimRunnerUsesDockerBinEnv(t *testing.T) {
+	t.Setenv("ENVOYAGE_DOCKER_BIN", "/custom/docker")
+
+	runner, err := NewShimRunner("/ignored/docker")
+	if err != nil {
+		t.Fatalf("NewShimRunner() error = %v", err)
+	}
+	if runner.DockerBin != "/custom/docker" {
+		t.Fatalf("DockerBin = %q, want env docker bin", runner.DockerBin)
+	}
+}
+
 func writeEncryptedDotenv(path string, recipient age.Recipient, plaintext string) error {
 	var encrypted bytes.Buffer
 	writer, err := age.Encrypt(&encrypted, recipient)
@@ -704,3 +762,13 @@ func envSliceToMap(env []string) map[string]string {
 	}
 	return out
 }
+
+const captureDockerScript = `#!/bin/sh
+printf '{"args":[' > "$CAPTURE"
+first=1
+for arg in "$@"; do
+  if [ "$first" = 1 ]; then first=0; else printf ',' >> "$CAPTURE"; fi
+  printf '"%s"' "$arg" >> "$CAPTURE"
+done
+printf '],"token":"%s"}' "$TOKEN" >> "$CAPTURE"
+`
