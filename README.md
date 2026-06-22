@@ -353,6 +353,19 @@ cp .env.example .env
 cp sonar-project.example.properties sonar-project.properties
 ```
 
+## Release
+
+Pushing a semantic version tag builds release archives for Linux, macOS, and
+Windows, then publishes them to GitHub Releases with SHA-256 checksums:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow strips the leading `v` and embeds `0.1.0` into the
+`envoyage version` output.
+
 Or with Go directly:
 
 ```bash

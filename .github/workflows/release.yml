@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build archives
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+
+          version="${TAG#v}"
+          mkdir -p dist
+
+          build() {
+            goos="$1"
+            goarch="$2"
+            ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+
+            name="envoyage_${version}_${goos}_${goarch}"
+            binary="dist/${name}${ext}"
+
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+              go build \
+                -trimpath \
+                -ldflags "-s -w -X main.version=${version}" \
+                -o "$binary" \
+                ./cmd/envoyage
+
+            if [ "$goos" = "windows" ]; then
+              (cd dist && zip -q "${name}.zip" "${name}${ext}")
+              rm "$binary"
+            else
+              tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+              rm "$binary"
+            fi
+          }
+
+          build linux amd64
+          build linux arm64
+          build darwin amd64
+          build darwin arm64
+          build windows amd64
+          build windows arm64
+
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "Envoyage ${TAG#v}"
