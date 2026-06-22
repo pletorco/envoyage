@@ -30,13 +30,28 @@ var (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := runForProgram(os.Args[0], os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "envoyage: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
+	return runForProgram("envoyage", args)
+}
+
+func runForProgram(program string, args []string) error {
+	if isDockerShimName(filepath.Base(program)) {
+		return runDockerShim(program, args)
+	}
+	return runEnvoyage(args)
+}
+
+func isDockerShimName(name string) bool {
+	return name == "docker" || name == "docker.exe"
+}
+
+func runEnvoyage(args []string) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printUsage()
 		return nil
@@ -60,6 +75,17 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runDockerShim(program string, args []string) error {
+	runner, err := compose.NewShimRunner(program)
+	if err != nil {
+		return err
+	}
+	if len(args) > 0 && args[0] == "compose" {
+		return compose.RunComposeWithRunner(context.Background(), args[1:], runner)
+	}
+	return runner.RunDocker(context.Background(), args, nil)
 }
 
 func runVersion(args []string, stdout io.Writer) error {

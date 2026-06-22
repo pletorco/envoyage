@@ -289,17 +289,51 @@ wrapper consumes those flags first, reads plaintext dotenv files or decrypts
 environment. The consumed `--env-file` flags are not forwarded to real
 `docker compose`.
 
-This first version supports:
+The default command shape is:
 
 ```bash
 envoyage compose up -d
 ```
 
-It does not yet replace the Docker CLI shape directly:
+## Optional Docker Shim Mode
+
+Envoyage can also run as an optional Docker shim. This mode is disabled unless
+the Envoyage binary is executed with the name `docker`, usually through a
+symlink placed earlier in `PATH` than the real Docker CLI.
+
+In shim mode, only `docker compose ...` is intercepted by Envoyage. Other Docker
+commands are passed through to the real Docker binary:
+
+```bash
+docker ps
+docker version
+```
+
+Create a user-local shim:
+
+```bash
+mkdir -p ~/.local/lib/envoyage ~/.local/bin
+cp ./envoyage ~/.local/lib/envoyage/envoyage
+ln -sf ~/.local/lib/envoyage/envoyage ~/.local/bin/docker
+```
+
+Put `~/.local/bin` before the real Docker directory in `PATH`, and point
+Envoyage at the real Docker binary:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export ENVOYAGE_DOCKER_BIN=/usr/bin/docker
+```
+
+Then Compose can be run with the Docker-shaped command:
 
 ```bash
 docker compose --env-file .env.age up -d
 ```
+
+If `ENVOYAGE_DOCKER_BIN` is not set, shim mode searches `PATH` for the next
+executable named `docker` that is not the Envoyage shim itself. Setting
+`ENVOYAGE_DOCKER_BIN` explicitly is recommended because it avoids ambiguity.
 
 ## Security Model and Limits
 

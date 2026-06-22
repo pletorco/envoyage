@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -496,6 +498,89 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestRunForProgramDockerShimInterceptsCompose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	capturePath := filepath.Join(dir, "capture.json")
+	dockerPath := filepath.Join(dir, "real-docker")
+
+	if err := os.WriteFile(envPath, []byte("TOKEN=from-shim-env\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(dockerPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(docker) error = %v", err)
+	}
+
+	t.Setenv("ENVOYAGE_DOCKER_BIN", dockerPath)
+	t.Setenv("CAPTURE", capturePath)
+
+	err := runForProgram("docker", []string{"compose", "--env-file", envPath, "-f", "compose.yaml", "config"})
+	if err != nil {
+		t.Fatalf("runForProgram(docker compose) error = %v", err)
+	}
+
+	capture := readDockerCapture(t, capturePath)
+	wantArgs := []string{"compose", "-f", "compose.yaml", "config"}
+	if strings.Join(capture.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", capture.Args, wantArgs)
+	}
+	if capture.Token != "from-shim-env" {
+		t.Fatalf("TOKEN = %q, want from-shim-env", capture.Token)
+	}
+}
+
+func TestRunForProgramDockerShimPassesThroughNonCompose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	capturePath := filepath.Join(dir, "capture.json")
+	dockerPath := filepath.Join(dir, "real-docker")
+
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TOKEN=should-not-load\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(dockerPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(docker) error = %v", err)
+	}
+
+	t.Chdir(dir)
+	t.Setenv("ENVOYAGE_DOCKER_BIN", dockerPath)
+	t.Setenv("CAPTURE", capturePath)
+	t.Setenv("TOKEN", "")
+
+	err := runForProgram("docker", []string{"version", "--format", "{{.Server.Version}}"})
+	if err != nil {
+		t.Fatalf("runForProgram(docker version) error = %v", err)
+	}
+
+	capture := readDockerCapture(t, capturePath)
+	wantArgs := []string{"version", "--format", "{{.Server.Version}}"}
+	if strings.Join(capture.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", capture.Args, wantArgs)
+	}
+	if capture.Token != "" {
+		t.Fatalf("TOKEN = %q, want no default env loading", capture.Token)
+	}
+}
+
+func TestDockerShimNameIncludesWindowsExecutable(t *testing.T) {
+	if !isDockerShimName("docker") {
+		t.Fatal("docker should be treated as a shim name")
+	}
+	if !isDockerShimName("docker.exe") {
+		t.Fatal("docker.exe should be treated as a shim name")
+	}
+	if isDockerShimName("envoyage") {
+		t.Fatal("envoyage should not be treated as a docker shim name")
+	}
+}
+
 func TestRunPrintsVersion(t *testing.T) {
 	tests := [][]string{
 		{"version"},
@@ -661,4 +746,34 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("Close(stdout reader) error = %v", err)
 	}
 	return string(out)
+}
+
+const captureDockerScript = `#!/bin/sh
+printf '{"args":[' > "$CAPTURE"
+first=1
+for arg in "$@"; do
+  if [ "$first" = 1 ]; then first=0; else printf ',' >> "$CAPTURE"; fi
+  printf '"%s"' "$arg" >> "$CAPTURE"
+done
+printf '],"token":"%s"}' "$TOKEN" >> "$CAPTURE"
+`
+
+type dockerCapture struct {
+	Args  []string `json:"args"`
+	Token string   `json:"token"`
+}
+
+func readDockerCapture(t *testing.T, path string) dockerCapture {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(capture) error = %v", err)
+	}
+
+	var capture dockerCapture
+	if err := json.Unmarshal(data, &capture); err != nil {
+		t.Fatalf("Unmarshal(capture) error = %v; data=%s", err, data)
+	}
+	return capture
 }
