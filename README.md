@@ -26,6 +26,37 @@ simple.
 
 License: MIT.
 
+## Requirements
+
+Runtime requirements:
+
+- Docker CLI with the Docker Compose plugin for `envoyage compose`
+- An age identity file for decrypting `.env.age`
+
+Build and development requirements:
+
+- Go 1.24 or newer
+- [go-task](https://taskfile.dev/) for the documented development tasks
+- Trivy and `govulncheck` for `task scan:cve`
+- SonarScanner CLI for `task sonar`
+
+Envoyage depends on the age encryption format. The application uses the
+`filippo.io/age` Go library directly, so the `age` CLI is not required for the
+normal Envoyage commands:
+
+```bash
+envoyage keygen
+envoyage encrypt
+envoyage decrypt
+```
+
+Installing the `age` CLI is still useful when you want an independent tool for
+interoperability, inspection, or manual encryption outside Envoyage:
+
+```bash
+age --version
+```
+
 ## Install
 
 ```bash
@@ -44,7 +75,8 @@ The initial Envoyage version is `0.1.0`.
 ## Create `.env.age`
 
 Envoyage uses the age encryption format through the `filippo.io/age` Go
-library. You do not need the `age` CLI for the normal Envoyage workflow.
+library. You do not need the `age` CLI for the normal Envoyage workflow, but
+files produced by Envoyage are standard age-encrypted files.
 
 Create a normal dotenv file for non-secret settings:
 
@@ -353,23 +385,39 @@ cp .env.example .env
 cp sonar-project.example.properties sonar-project.properties
 ```
 
-## Release
-
-Pushing a semantic version tag builds release archives for Linux, macOS, and
-Windows, then publishes them to GitHub Releases with SHA-256 checksums:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The release workflow strips the leading `v` and embeds `0.1.0` into the
-`envoyage version` output.
-
 Or with Go directly:
 
 ```bash
 go test ./...
 go build ./cmd/envoyage
 AGE_IDENTITY_FILE=./age-key.txt ./envoyage compose config
+```
+
+## Release
+
+Releases are built by GitHub Actions from semantic version tags.
+
+Before tagging, make sure the tree is clean and the checks pass:
+
+```bash
+task check
+git status --short
+```
+
+Create and push a tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
+and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
+files to GitHub Releases.
+
+The workflow strips the leading `v` and embeds the tag version into
+`envoyage version`. For example, `v0.1.0` produces:
+
+```text
+envoyage 0.1.0
 ```
