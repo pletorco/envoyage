@@ -3,7 +3,7 @@ version: '3'
 vars:
   BINARY: envoyage
   MAIN: ./cmd/envoyage
-  VERSION: 0.1.0
+  VERSION: 0.2.0
 
 tasks:
   default:
@@ -71,6 +71,27 @@ tasks:
         output="$(AGE_IDENTITY_FILE=./age-key.txt ENVOYAGE_DOCKER_BIN=/bin/echo "$bin" compose config)"
         test "$output" = "compose config"
 
+  smoke:shim:
+    desc: Run the optional docker shim mode without invoking Docker
+    deps:
+      - build
+    cmds:
+      - |
+        bin="$PWD/{{.BINARY}}"
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
+        mkdir -p "$tmpdir/shim" "$tmpdir/real" "$tmpdir/app"
+        ln -s "$bin" "$tmpdir/shim/docker"
+        cat > "$tmpdir/real/docker" <<'EOF'
+        #!/bin/sh
+        printf '%s' "$*"
+        EOF
+        chmod 700 "$tmpdir/real/docker"
+        cd "$tmpdir/app"
+        printf 'TOKEN=secret-value\n' > .env
+        output="$(PATH="$tmpdir/shim:$tmpdir/real:$PATH" docker compose config)"
+        test "$output" = "compose config"
+
   scan:cve:
     desc: Scan dependencies for CVEs with Trivy and govulncheck
     cmds:
@@ -119,6 +140,7 @@ tasks:
       - task: test
       - task: smoke
       - task: smoke:crypto
+      - task: smoke:shim
 
   clean:
     desc: Remove build artifacts

@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	version                  = "0.1.0"
+	version                  = "0.2.0"
 	defaultKeygenOutputPath  = compose.DefaultIdentityFile
 	defaultEncryptInputPath  = ".secrets.env"
 	defaultEncryptOutputPath = ".env.age"
@@ -30,13 +30,28 @@ var (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := runForProgram(os.Args[0], os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "envoyage: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
+	return runForProgram("envoyage", args)
+}
+
+func runForProgram(program string, args []string) error {
+	if isDockerShimName(filepath.Base(program)) {
+		return runDockerShim(program, args)
+	}
+	return runEnvoyage(args)
+}
+
+func isDockerShimName(name string) bool {
+	return name == "docker" || name == "docker.exe"
+}
+
+func runEnvoyage(args []string) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printUsage()
 		return nil
@@ -55,11 +70,24 @@ func run(args []string) error {
 		return runDecrypt(args[1:], os.Stdout)
 	case "keygen":
 		return runKeygen(args[1:], os.Stdout)
+	case "shim":
+		return runShim(args[1:], os.Stdout)
 	case "version":
 		return runVersion(args[1:], os.Stdout)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runDockerShim(program string, args []string) error {
+	runner, err := compose.NewShimRunner(program)
+	if err != nil {
+		return err
+	}
+	if len(args) > 0 && args[0] == "compose" {
+		return compose.RunComposeWithRunner(context.Background(), args[1:], runner)
+	}
+	return runner.RunDocker(context.Background(), args, nil)
 }
 
 func runVersion(args []string, stdout io.Writer) error {
@@ -285,6 +313,7 @@ Usage:
   envoyage encrypt [--in .secrets.env] [--out .env.age] [--identity age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] --recipient age1...
   envoyage decrypt [--in .env.age] [--out .secrets.env] [--identity age-key.txt]
+  envoyage shim status|install|uninstall
   envoyage version
 
 Examples:
@@ -297,6 +326,8 @@ Examples:
   envoyage compose up -d
   envoyage compose --identity ./age-key.txt config
   envoyage compose --env-file custom.env --env-file custom.env.age config
+  envoyage shim status
+  envoyage shim install --bin-dir ~/.local/bin
 
 Environment:
   AGE_IDENTITY_FILE      age identity file path when --identity is omitted

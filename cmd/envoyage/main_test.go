@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -496,6 +498,370 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestRunForProgramDockerShimInterceptsCompose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	capturePath := filepath.Join(dir, "capture.json")
+	dockerPath := filepath.Join(dir, "real-docker")
+
+	if err := os.WriteFile(envPath, []byte("TOKEN=from-shim-env\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(dockerPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(docker) error = %v", err)
+	}
+
+	t.Setenv("ENVOYAGE_DOCKER_BIN", dockerPath)
+	t.Setenv("CAPTURE", capturePath)
+
+	err := runForProgram("docker", []string{"compose", "--env-file", envPath, "-f", "compose.yaml", "config"})
+	if err != nil {
+		t.Fatalf("runForProgram(docker compose) error = %v", err)
+	}
+
+	capture := readDockerCapture(t, capturePath)
+	wantArgs := []string{"compose", "-f", "compose.yaml", "config"}
+	if strings.Join(capture.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", capture.Args, wantArgs)
+	}
+	if capture.Token != "from-shim-env" {
+		t.Fatalf("TOKEN = %q, want from-shim-env", capture.Token)
+	}
+}
+
+func TestRunForProgramDockerShimPassesThroughNonCompose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	capturePath := filepath.Join(dir, "capture.json")
+	dockerPath := filepath.Join(dir, "real-docker")
+
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TOKEN=should-not-load\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(dockerPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(docker) error = %v", err)
+	}
+
+	t.Chdir(dir)
+	t.Setenv("ENVOYAGE_DOCKER_BIN", dockerPath)
+	t.Setenv("CAPTURE", capturePath)
+	t.Setenv("TOKEN", "")
+
+	err := runForProgram("docker", []string{"version", "--format", "{{.Server.Version}}"})
+	if err != nil {
+		t.Fatalf("runForProgram(docker version) error = %v", err)
+	}
+
+	capture := readDockerCapture(t, capturePath)
+	wantArgs := []string{"version", "--format", "{{.Server.Version}}"}
+	if strings.Join(capture.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", capture.Args, wantArgs)
+	}
+	if capture.Token != "" {
+		t.Fatalf("TOKEN = %q, want no default env loading", capture.Token)
+	}
+}
+
+func TestDockerShimNameIncludesWindowsExecutable(t *testing.T) {
+	if !isDockerShimName("docker") {
+		t.Fatal("docker should be treated as a shim name")
+	}
+	if !isDockerShimName("docker.exe") {
+		t.Fatal("docker.exe should be treated as a shim name")
+	}
+	if isDockerShimName("envoyage") {
+		t.Fatal("envoyage should not be treated as a docker shim name")
+	}
+}
+
+func TestShimInstallStatusAndUninstall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	target := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return target, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	var installOut bytes.Buffer
+	if err := runShim([]string{"install", "--bin-dir", binDir}, &installOut); err != nil {
+		t.Fatalf("runShim(install) error = %v", err)
+	}
+	shimPath := filepath.Join(binDir, "docker")
+	linkTarget, err := os.Readlink(shimPath)
+	if err != nil {
+		t.Fatalf("Readlink(shim) error = %v", err)
+	}
+	if linkTarget != target {
+		t.Fatalf("shim target = %q, want %q", linkTarget, target)
+	}
+	if !strings.Contains(installOut.String(), "installed shim") {
+		t.Fatalf("install output = %q, want installed shim", installOut.String())
+	}
+
+	var statusOut bytes.Buffer
+	if err := runShim([]string{"status", "--bin-dir", binDir}, &statusOut); err != nil {
+		t.Fatalf("runShim(status) error = %v", err)
+	}
+	if !strings.Contains(statusOut.String(), "installed: yes") {
+		t.Fatalf("status output = %q, want installed yes", statusOut.String())
+	}
+	if !strings.Contains(statusOut.String(), "shim target: "+target) {
+		t.Fatalf("status output = %q, want shim target", statusOut.String())
+	}
+
+	var secondInstallOut bytes.Buffer
+	if err := runShim([]string{"install", "--bin-dir", binDir}, &secondInstallOut); err != nil {
+		t.Fatalf("runShim(install existing) error = %v", err)
+	}
+	if !strings.Contains(secondInstallOut.String(), "shim already installed") {
+		t.Fatalf("second install output = %q, want already installed", secondInstallOut.String())
+	}
+
+	var uninstallOut bytes.Buffer
+	if err := runShim([]string{"uninstall", "--bin-dir", binDir}, &uninstallOut); err != nil {
+		t.Fatalf("runShim(uninstall) error = %v", err)
+	}
+	if !strings.Contains(uninstallOut.String(), "removed shim") {
+		t.Fatalf("uninstall output = %q, want removed shim", uninstallOut.String())
+	}
+	if _, err := os.Lstat(shimPath); !os.IsNotExist(err) {
+		t.Fatalf("shim still exists after uninstall: %v", err)
+	}
+}
+
+func TestShimInstallForceRecreatesExistingShim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	target := filepath.Join(dir, "envoyage")
+	shimPath := filepath.Join(binDir, "docker")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return target, nil }
+
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.Symlink(target, shimPath); err != nil {
+		t.Fatalf("Symlink(existing shim) error = %v", err)
+	}
+
+	if err := runShim([]string{"install", "--bin-dir", binDir, "--force"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runShim(install force) error = %v", err)
+	}
+	linkTarget, err := os.Readlink(shimPath)
+	if err != nil {
+		t.Fatalf("Readlink(shim) error = %v", err)
+	}
+	if linkTarget != target {
+		t.Fatalf("shim target = %q, want %q", linkTarget, target)
+	}
+}
+
+func TestShimUninstallMissingIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return target, nil }
+
+	var out bytes.Buffer
+	if err := runShim([]string{"uninstall", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
+		t.Fatalf("runShim(uninstall missing) error = %v", err)
+	}
+	if !strings.Contains(out.String(), "shim not installed") {
+		t.Fatalf("uninstall missing output = %q, want not installed", out.String())
+	}
+}
+
+func TestShimRefusesNonEnvoyageDocker(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	target := filepath.Join(dir, "envoyage")
+	shimPath := filepath.Join(binDir, "docker")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return target, nil }
+
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(existing docker) error = %v", err)
+	}
+
+	err := runShim([]string{"install", "--bin-dir", binDir, "--force"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(install non-envoyage) error = nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite non-Envoyage docker") {
+		t.Fatalf("install error = %q, want overwrite refusal", err.Error())
+	}
+
+	err = runShim([]string{"uninstall", "--bin-dir", binDir}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(uninstall non-envoyage) error = nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to remove non-Envoyage docker") {
+		t.Fatalf("uninstall error = %q, want remove refusal", err.Error())
+	}
+}
+
+func TestShimStatusWithDockerBinEnv(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return target, nil }
+	t.Setenv("ENVOYAGE_DOCKER_BIN", "/custom/docker")
+
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runShim([]string{"status", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
+		t.Fatalf("runShim(status) error = %v", err)
+	}
+	if !strings.Contains(out.String(), "ENVOYAGE_DOCKER_BIN: /custom/docker") {
+		t.Fatalf("status output = %q, want configured docker bin", out.String())
+	}
+}
+
+func TestShimUsesDefaultHomeBinDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return target, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	if err := runShim([]string{"install"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runShim(default install) error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".local", "bin", "docker")); err != nil {
+		t.Fatalf("default shim was not installed: %v", err)
+	}
+}
+
+func TestShimHelpAndRunDispatch(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := run([]string{"shim", "--help"}); err != nil {
+			t.Fatalf("run(shim help) error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "envoyage shim status") {
+		t.Fatalf("shim help output = %q, want shim usage", output)
+	}
+}
+
+func TestShimRejectsUnknownCommandAndExtraArgs(t *testing.T) {
+	err := runShim([]string{"unknown"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(unknown) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `unknown shim command "unknown"`) {
+		t.Fatalf("error = %q, want unknown command", err.Error())
+	}
+
+	err = runShim([]string{"status", "extra"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(status extra) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "shim status does not accept arguments") {
+		t.Fatalf("error = %q, want extra args error", err.Error())
+	}
+}
+
+func TestShimRejectsExtraArgsForInstallAndUninstall(t *testing.T) {
+	tests := [][]string{
+		{"install", "extra"},
+		{"uninstall", "extra"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := runShim(args, &bytes.Buffer{})
+			if err == nil {
+				t.Fatal("runShim() error = nil, want extra args error")
+			}
+			if !strings.Contains(err.Error(), "does not accept arguments") {
+				t.Fatalf("error = %q, want extra args error", err.Error())
+			}
+		})
+	}
+}
+
+func TestShimPathHelpers(t *testing.T) {
+	dir := t.TempDir()
+	restoreShimHooks(t)
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	got, err := expandHomePath("~")
+	if err != nil {
+		t.Fatalf("expandHomePath(~) error = %v", err)
+	}
+	if got != dir {
+		t.Fatalf("expandHomePath(~) = %q, want %q", got, dir)
+	}
+
+	got, err = expandHomePath("~/bin")
+	if err != nil {
+		t.Fatalf("expandHomePath(~/bin) error = %v", err)
+	}
+	if got != filepath.Join(dir, "bin") {
+		t.Fatalf("expandHomePath(~/bin) = %q, want home bin", got)
+	}
+
+	_, err = dockerShimPath("")
+	if err == nil {
+		t.Fatal("dockerShimPath(empty) error = nil, want error")
+	}
+}
+
+func TestShimExecutablePathReportsErrors(t *testing.T) {
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return "", os.ErrPermission }
+
+	_, err := envoyageExecutablePath()
+	if err == nil {
+		t.Fatal("envoyageExecutablePath() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "resolve envoyage executable") {
+		t.Fatalf("error = %q, want executable resolution", err.Error())
+	}
+}
+
 func TestRunPrintsVersion(t *testing.T) {
 	tests := [][]string{
 		{"version"},
@@ -511,8 +877,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.1.0\n" {
-				t.Fatalf("version output = %q, want envoyage 0.1.0", output)
+			if output != "envoyage 0.2.0\n" {
+				t.Fatalf("version output = %q, want envoyage 0.2.0", output)
 			}
 		})
 	}
@@ -635,6 +1001,17 @@ func restoreKeygenPermissionHooks(t *testing.T) {
 	})
 }
 
+func restoreShimHooks(t *testing.T) {
+	t.Helper()
+
+	oldExecutable := osExecutable
+	oldUserHomeDir := userHomeDir
+	t.Cleanup(func() {
+		osExecutable = oldExecutable
+		userHomeDir = oldUserHomeDir
+	})
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -661,4 +1038,34 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("Close(stdout reader) error = %v", err)
 	}
 	return string(out)
+}
+
+const captureDockerScript = `#!/bin/sh
+printf '{"args":[' > "$CAPTURE"
+first=1
+for arg in "$@"; do
+  if [ "$first" = 1 ]; then first=0; else printf ',' >> "$CAPTURE"; fi
+  printf '"%s"' "$arg" >> "$CAPTURE"
+done
+printf '],"token":"%s"}' "$TOKEN" >> "$CAPTURE"
+`
+
+type dockerCapture struct {
+	Args  []string `json:"args"`
+	Token string   `json:"token"`
+}
+
+func readDockerCapture(t *testing.T, path string) dockerCapture {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(capture) error = %v", err)
+	}
+
+	var capture dockerCapture
+	if err := json.Unmarshal(data, &capture); err != nil {
+		t.Fatalf("Unmarshal(capture) error = %v; data=%s", err, data)
+	}
+	return capture
 }

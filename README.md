@@ -70,7 +70,77 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The initial Envoyage version is `0.1.0`.
+The current Envoyage version is `0.2.0`.
+
+## Quickstart
+
+This walkthrough uses the PostgreSQL example. It keeps non-secret settings in
+`.env`, encrypts example-only passwords from `.secrets.env` into `.env.age`,
+then runs Docker Compose through Envoyage.
+
+Build Envoyage from the repository root:
+
+```bash
+go build -o envoyage ./cmd/envoyage
+```
+
+Move into the example:
+
+```bash
+cd examples/postgresql
+```
+
+Generate a local age identity for the example:
+
+```bash
+../../envoyage keygen --out age-key.txt
+```
+
+Encrypt `.secrets.env` to `.env.age`:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt ../../envoyage encrypt
+```
+
+Preview the Compose configuration:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt ../../envoyage compose -f compose.yaml config
+```
+
+Start the services:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt ../../envoyage compose -f compose.yaml up -d
+```
+
+Open pgAdmin:
+
+```text
+http://localhost:8080
+```
+
+Use `PGADMIN_DEFAULT_EMAIL` from `.env` and `PGADMIN_DEFAULT_PASSWORD` from
+`.secrets.env`.
+
+When you are done:
+
+```bash
+docker compose -f compose.yaml down -v
+```
+
+The committed `.secrets.env` in `examples/` is intentionally included for a
+copy-and-run demo. In real projects, do not commit plaintext `.secrets.env`;
+keep `.env.age` and the age identity distribution under your own deployment
+policy.
+
+Optional Docker-shaped flow:
+
+```bash
+../../envoyage shim install --bin-dir ./bin
+PATH="$PWD/bin:$PATH" ENVOYAGE_DOCKER_BIN=/usr/bin/docker docker compose -f compose.yaml config
+../../envoyage shim uninstall --bin-dir ./bin
+```
 
 ## Create `.env.age`
 
@@ -289,17 +359,65 @@ wrapper consumes those flags first, reads plaintext dotenv files or decrypts
 environment. The consumed `--env-file` flags are not forwarded to real
 `docker compose`.
 
-This first version supports:
+The default command shape is:
 
 ```bash
 envoyage compose up -d
 ```
 
-It does not yet replace the Docker CLI shape directly:
+## Optional Docker Shim Mode
+
+Envoyage can also run as an optional Docker shim. This mode is disabled unless
+the Envoyage binary is executed with the name `docker`, usually through a
+symlink placed earlier in `PATH` than the real Docker CLI.
+
+In shim mode, only `docker compose ...` is intercepted by Envoyage. Other Docker
+commands are passed through to the real Docker binary:
+
+```bash
+docker ps
+docker version
+```
+
+Create a user-local shim:
+
+```bash
+envoyage shim install
+```
+
+Put `~/.local/bin` before the real Docker directory in `PATH`, and point
+Envoyage at the real Docker binary:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export ENVOYAGE_DOCKER_BIN=/usr/bin/docker
+```
+
+Check the current shim state:
+
+```bash
+envoyage shim status
+```
+
+Then Compose can be run with the Docker-shaped command:
 
 ```bash
 docker compose --env-file .env.age up -d
 ```
+
+If `ENVOYAGE_DOCKER_BIN` is not set, shim mode searches `PATH` for the next
+executable named `docker` that is not the Envoyage shim itself. Setting
+`ENVOYAGE_DOCKER_BIN` explicitly is recommended because it avoids ambiguity.
+
+Remove the shim when you no longer want Docker-shaped interception:
+
+```bash
+envoyage shim uninstall
+```
+
+`envoyage shim install` refuses to overwrite an existing non-Envoyage `docker`
+file, even with `--force`. `--force` only recreates a shim symlink that already
+points at the current Envoyage binary.
 
 ## Security Model and Limits
 
@@ -407,8 +525,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -416,8 +534,8 @@ and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
 files to GitHub Releases.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.1.0` produces:
+`envoyage version`. For example, `v0.2.0` produces:
 
 ```text
-envoyage 0.1.0
+envoyage 0.2.0
 ```
