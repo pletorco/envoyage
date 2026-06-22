@@ -1,0 +1,126 @@
+version: '3'
+
+vars:
+  BINARY: envoyage
+  MAIN: ./cmd/envoyage
+  VERSION: 0.1.0
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - gofmt -w cmd internal
+
+  tidy:
+    desc: Tidy Go module dependencies
+    cmds:
+      - go mod tidy
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  coverage:
+    desc: Run tests and write Go coverage profile for Sonar
+    cmds:
+      - go test ./... -covermode=atomic -coverprofile=coverage.out
+
+  build:
+    desc: Build the envoyage binary
+    run: once
+    cmds:
+      - go build -ldflags "-X main.version={{.VERSION}}" -o {{.BINARY}} {{.MAIN}}
+
+  smoke:
+    desc: Run a safe wrapper smoke test without invoking Docker
+    deps:
+      - build
+    cmds:
+      - |
+        bin="$PWD/{{.BINARY}}"
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
+        cd "$tmpdir"
+        printf 'TOKEN=secret-value\n' > .env
+        output="$(ENVOYAGE_DOCKER_BIN=/bin/echo "$bin" compose config)"
+        test "$output" = "compose config"
+
+  smoke:crypto:
+    desc: Generate an age key, encrypt an env file, and load it through compose wrapper
+    deps:
+      - build
+    cmds:
+      - |
+        bin="$PWD/{{.BINARY}}"
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
+        cd "$tmpdir"
+        "$bin" keygen --out age-key.txt >/dev/null
+        printf 'APP_ENV=test\n' > .env
+        printf 'TOKEN=secret-value\n' > .secrets.env
+        AGE_IDENTITY_FILE=./age-key.txt "$bin" encrypt >/dev/null
+        rm .secrets.env
+        AGE_IDENTITY_FILE=./age-key.txt "$bin" decrypt >/dev/null
+        output="$(AGE_IDENTITY_FILE=./age-key.txt ENVOYAGE_DOCKER_BIN=/bin/echo "$bin" compose config)"
+        test "$output" = "compose config"
+
+  scan:cve:
+    desc: Scan dependencies for CVEs with Trivy and govulncheck
+    cmds:
+      - task: scan:cve:trivy
+      - task: scan:cve:govulncheck
+
+  scan:cve:trivy:
+    desc: Scan filesystem dependencies with Trivy
+    preconditions:
+      - sh: command -v trivy >/dev/null 2>&1
+        msg: "trivy is required. Install it from https://aquasecurity.github.io/trivy/"
+    cmds:
+      - trivy fs --scanners vuln --exit-code 1 --no-progress .
+
+  scan:cve:govulncheck:
+    desc: Scan Go code with govulncheck
+    cmds:
+      - |
+        if command -v govulncheck >/dev/null 2>&1; then
+          govulncheck ./...
+        else
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        fi
+
+  sonar:
+    desc: Run Sonar analysis using .env and sonar-project.properties
+    deps:
+      - coverage
+    dotenv:
+      - .env
+    preconditions:
+      - sh: test -f .env
+        msg: ".env is required for Sonar connection settings"
+      - sh: test -f sonar-project.properties
+        msg: "sonar-project.properties is required"
+      - sh: command -v sonar-scanner >/dev/null 2>&1
+        msg: "sonar-scanner is required. Install SonarScanner CLI and make sure it is on PATH"
+    cmds:
+      - sonar-scanner -Dproject.settings=sonar-project.properties
+
+  check:
+    desc: Format, tidy, test, build, and smoke test
+    cmds:
+      - task: fmt
+      - task: tidy
+      - task: test
+      - task: smoke
+      - task: smoke:crypto
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.BINARY}} coverage.* .scannerwork

@@ -1,0 +1,22 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: envoyage-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval 'db.adminCommand(\"ping\").ok' | grep 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - mongodb-data:/data/db
+
+volumes:
+  mongodb-data:

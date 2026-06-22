@@ -1,0 +1,16 @@
+.env
+.secrets.env
+!examples/**/.env
+!examples/**/.secrets.env
+examples/**/*.env.age
+*.env.age
+age-key.txt
+**/age-key.txt
+coverage.out
+coverage.*
+.scannerwork/
+sonar-project.properties
+/envoyage
+bin/
+dist/
+*.test

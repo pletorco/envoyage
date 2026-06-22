@@ -1,0 +1,21 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: envoyage-redis
+    command:
+      - sh
+      - -c
+      - redis-server --requirepass "$${REDIS_PASSWORD}" --databases "$${REDIS_DATABASES}"
+    environment:
+      REDIS_DATABASES: ${REDIS_DATABASES}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
