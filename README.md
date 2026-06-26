@@ -37,7 +37,7 @@ Runtime requirements:
 
 Build and development requirements:
 
-- Go 1.24 or newer
+- Go 1.25 or newer
 - [go-task](https://taskfile.dev/) for the documented development tasks
 - Trivy and `govulncheck` for `task scan:cve`
 - SonarScanner CLI for `task sonar`
