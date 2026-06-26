@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	version                  = "0.2.1"
+	version                  = "0.3.0"
 	defaultKeygenOutputPath  = compose.DefaultIdentityFile
 	defaultEncryptInputPath  = ".secrets.env"
 	defaultEncryptOutputPath = ".env.age"
@@ -41,14 +41,27 @@ func run(args []string) error {
 }
 
 func runForProgram(program string, args []string) error {
-	if isDockerShimName(filepath.Base(program)) {
-		return runDockerShim(program, args)
+	runtimeName, ok := shimRuntimeName(filepath.Base(program))
+	if ok {
+		return runRuntimeShim(runtimeName, program, args)
 	}
 	return runEnvoyage(args)
 }
 
 func isDockerShimName(name string) bool {
-	return name == "docker" || name == "docker.exe"
+	runtimeName, ok := shimRuntimeName(name)
+	return ok && runtimeName == "docker"
+}
+
+func shimRuntimeName(name string) (string, bool) {
+	switch name {
+	case "docker", "docker.exe":
+		return "docker", true
+	case "podman", "podman.exe":
+		return "podman", true
+	default:
+		return "", false
+	}
 }
 
 func runEnvoyage(args []string) error {
@@ -66,6 +79,8 @@ func runEnvoyage(args []string) error {
 		return compose.RunCompose(context.Background(), args[1:])
 	case "completion":
 		return runCompletion(args[1:], os.Stdout)
+	case "env":
+		return runEnv(args[1:], os.Stdout)
 	case "install":
 		return runInstall(args[1:], os.Stdout)
 	case "encrypt":
@@ -88,7 +103,11 @@ func runEnvoyage(args []string) error {
 }
 
 func runDockerShim(program string, args []string) error {
-	runner, err := compose.NewShimRunner(program)
+	return runRuntimeShim("docker", program, args)
+}
+
+func runRuntimeShim(runtimeName string, program string, args []string) error {
+	runner, err := compose.NewShimRunnerForRuntime(runtimeName, program)
 	if err != nil {
 		return err
 	}
@@ -334,8 +353,10 @@ Usage:
   envoyage encrypt [--in .secrets.env] [--out .env.age] [--identity age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] --recipient age1...
   envoyage decrypt [--in .env.age] [--out .secrets.env] [--identity age-key.txt]
+  envoyage env extract [--compose compose.yaml] [--write]
+  envoyage env inline --out compose.inline.yaml [--compose compose.yaml]
   envoyage completion bash|zsh|fish|powershell
-  envoyage shim status|install|uninstall
+  envoyage shim status|install|uninstall [--runtime auto|docker|podman|all]
   envoyage version
 
 Examples:
@@ -347,19 +368,22 @@ Examples:
   envoyage encrypt
   envoyage decrypt
   envoyage encrypt --in .secrets.env --out .env.age --identity age-key.txt
+  envoyage env extract
+  envoyage env inline --out compose.inline.yaml
   envoyage compose up -d
   envoyage compose --identity ./age-key.txt config
   envoyage compose --env-file custom.env --env-file custom.env.age config
   envoyage completion bash > ~/.local/share/bash-completion/completions/envoyage
   envoyage shim status
-  envoyage shim install --bin-dir ~/.local/bin
+  envoyage shim install --runtime auto --bin-dir ~/.local/bin
   sudo envoyage install --system
   sudo envoyage shim install --system
 
 Environment:
   AGE_IDENTITY_FILE      age identity file path when --identity is omitted
   default identity       /etc/envoyage/envoyage-key.txt
-  ENVOYAGE_DOCKER_BIN   docker binary path, defaults to docker`)
+  ENVOYAGE_DOCKER_BIN   docker binary path, defaults to docker
+  ENVOYAGE_PODMAN_BIN   podman binary path, defaults to podman`)
 }
 
 type stringList []string

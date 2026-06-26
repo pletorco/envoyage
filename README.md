@@ -72,7 +72,7 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The current Envoyage version is `0.2.1`.
+The current Envoyage version is `0.3.0`.
 
 Install the current binary into a user-local location:
 
@@ -232,6 +232,76 @@ Optional Docker-shaped flow:
 envoyage shim install --bin-dir ./bin
 PATH="$PWD/bin:$PATH" ENVOYAGE_DOCKER_BIN=/usr/bin/docker docker compose -f compose.yaml config
 envoyage shim uninstall --bin-dir ./bin
+```
+
+## Extract And Inline
+
+Envoyage can help migrate Compose files that keep fixed values directly under
+`services.*.environment`.
+
+Preview an extraction:
+
+```bash
+envoyage env extract
+```
+
+This scans `compose.yaml`, `compose.yml`, `docker-compose.yaml`, or
+`docker-compose.yml` when exactly one exists. Pass `--compose` when you want a
+specific file:
+
+```bash
+envoyage env extract --compose compose.yaml
+```
+
+The preview prints key names only. Values are not printed:
+
+```text
+extract: compose.yaml
+
+.env:
+  DB_HOST
+  DB_USER
+
+.secrets.env:
+  DB_PASSWORD
+  API_TOKEN
+
+compose updates:
+  services.app.environment.DB_HOST
+  services.app.environment.DB_PASSWORD
+
+dry-run: pass --write to update files
+```
+
+Write `.env`, `.secrets.env`, and update the Compose file:
+
+```bash
+envoyage env extract --write
+```
+
+Secret-looking keys such as `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`,
+`PRIVATE_KEY`, `ACCESS_KEY`, and `CREDENTIAL` are written to `.secrets.env`.
+Other extracted keys are written to `.env`. Existing keys are reused when their
+values match; conflicts stop the command without printing the conflicting
+values. Disable secret splitting when you want every extracted key in `.env`:
+
+```bash
+envoyage env extract --secrets=false --write
+```
+
+The inverse operation is `inline`. It writes a separate Compose file with
+`${VAR}` values replaced from `.env`, `.secrets.env`, and `.env.age`:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt envoyage env inline --out compose.inline.yaml
+```
+
+`inline` never modifies the source Compose file and requires `--out`. The output
+file may contain plaintext secrets, so treat it as sensitive and do not commit
+it. Existing output files are not overwritten unless `--force` is passed:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt envoyage env inline --out compose.inline.yaml --force
 ```
 
 ## Create `.env.age`
@@ -457,39 +527,53 @@ The default command shape is:
 envoyage compose up -d
 ```
 
-## Optional Docker Shim Mode
+## Optional Docker/Podman Shim Mode
 
-Envoyage can also run as an optional Docker shim. This mode is disabled unless
-the Envoyage binary is executed with the name `docker`, usually through a
-symlink placed earlier in `PATH` than the real Docker CLI.
+Envoyage can also run as an optional Docker or Podman shim. This mode is
+disabled unless the Envoyage binary is executed with the name `docker` or
+`podman`, usually through a symlink placed earlier in `PATH` than the real
+runtime CLI.
 
-In shim mode, only `docker compose ...` is intercepted by Envoyage. Other Docker
-commands are passed through to the real Docker binary:
+In shim mode, only `docker compose ...` and `podman compose ...` are intercepted
+by Envoyage. Other runtime commands are passed through to the real binary:
 
 ```bash
 docker ps
 docker version
+podman ps
+podman version
 ```
 
-Create a user-local shim:
+Create user-local shims for the runtimes detected on `PATH`:
 
 ```bash
 envoyage shim install
 ```
 
 `envoyage shim install` first ensures Envoyage itself is installed to a stable
-location, then creates the `docker` shim symlink to that installed binary. For
-the default user-local mode, the shim points to
-`~/.local/lib/envoyage/envoyage`. With `--system`, it points to
-`/usr/local/lib/envoyage/envoyage`. Use `--force` when you intentionally want to
-refresh both the installed Envoyage binary and the shim symlink.
+location, then creates `docker` and/or `podman` shim symlinks to that installed
+binary. The default `--runtime auto` mode creates shims only for runtimes that
+are detected. You can be explicit when needed:
 
-Put `~/.local/bin` before the real Docker directory in `PATH`, and point
-Envoyage at the real Docker binary:
+```bash
+envoyage shim install --runtime docker
+envoyage shim install --runtime podman
+envoyage shim install --runtime all
+```
+
+For the default user-local mode, each shim points to
+`~/.local/lib/envoyage/envoyage`. With `--system`, shims point to
+`/usr/local/lib/envoyage/envoyage`. Use `--force` when you intentionally want to
+refresh both the installed Envoyage binary and the Envoyage-managed shim
+symlinks.
+
+Put `~/.local/bin` before the real runtime directory in `PATH`, and optionally
+point Envoyage at the real runtime binaries:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 export ENVOYAGE_DOCKER_BIN=/usr/bin/docker
+export ENVOYAGE_PODMAN_BIN=/usr/bin/podman
 ```
 
 Check the current shim state:
@@ -504,9 +588,16 @@ Then Compose can be run with the Docker-shaped command:
 docker compose --env-file .env.age up -d
 ```
 
-If `ENVOYAGE_DOCKER_BIN` is not set, shim mode searches `PATH` for the next
-executable named `docker` that is not the Envoyage shim itself. Setting
-`ENVOYAGE_DOCKER_BIN` explicitly is recommended because it avoids ambiguity.
+Or with Podman when `podman compose` is available:
+
+```bash
+podman compose --env-file .env.age up -d
+```
+
+If `ENVOYAGE_DOCKER_BIN` or `ENVOYAGE_PODMAN_BIN` is not set, shim mode searches
+`PATH` for the next executable named `docker` or `podman` that is not the
+Envoyage shim itself. Setting the runtime binary explicitly is recommended
+because it avoids ambiguity.
 
 Remove the shim when you no longer want Docker-shaped interception:
 
@@ -516,10 +607,11 @@ hash -r
 ```
 
 By default, `envoyage shim uninstall` checks both the user-local shim path and
-the system-wide shim path, then removes only Envoyage-managed shim symlinks. Use
-`--system` or `--bin-dir` only when you want to target one location explicitly.
-The user-local path is resolved from the current process user, so
-`sudo envoyage shim uninstall` checks root's home plus the system-wide path.
+the system-wide shim path for both Docker and Podman, then removes only
+Envoyage-managed shim symlinks. Use `--runtime docker|podman|all`, `--system`,
+or `--bin-dir` only when you want to target one runtime or location explicitly.
+The user-local path is resolved from the current process user, so `sudo envoyage
+shim uninstall` checks root's home plus the system-wide path.
 
 For a system-wide shim under `/usr/local/bin`, run:
 
@@ -532,13 +624,13 @@ hash -r
 ```
 
 System-wide shim mode first installs Envoyage under `/usr/local/lib/envoyage`,
-then creates `/usr/local/bin/docker` as a symlink to that installed binary. It
-still refuses to overwrite an existing non-Envoyage `docker` file, even with
-`--force`.
+then creates `/usr/local/bin/docker` and/or `/usr/local/bin/podman` as symlinks
+to that installed binary. It still refuses to overwrite existing non-Envoyage
+runtime files, even with `--force`.
 
-`envoyage shim install` refuses to overwrite an existing non-Envoyage `docker`
-file, even with `--force`. `--force` only recreates a shim symlink that already
-points at the current Envoyage binary.
+`envoyage shim install` refuses to overwrite an existing non-Envoyage runtime
+file, even with `--force`. `--force` only recreates shim symlinks that already
+point at Envoyage.
 
 ## Security Model and Limits
 
@@ -601,6 +693,7 @@ With [go-task](https://taskfile.dev/):
 task check
 task build
 task test
+task test:e2e
 task coverage
 task smoke:crypto
 task scan:cve
@@ -608,6 +701,10 @@ task sonar
 ```
 
 `task build` embeds the version from `Taskfile.yml` into the binary.
+
+`task test:e2e` builds a temporary Envoyage binary and runs end-to-end tests
+against fake Docker and Podman runtime scripts. It does not require a Docker or
+Podman daemon.
 
 `task scan:cve` requires Trivy. It uses an installed `govulncheck` binary when
 available, otherwise it runs `golang.org/x/vuln/cmd/govulncheck` through
@@ -646,8 +743,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -655,8 +752,8 @@ and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
 files to GitHub Releases.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.2.1` produces:
+`envoyage version`. For example, `v0.3.0` produces:
 
 ```text
-envoyage 0.2.1
+envoyage 0.3.0
 ```

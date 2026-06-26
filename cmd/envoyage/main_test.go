@@ -569,6 +569,77 @@ func TestRunForProgramDockerShimPassesThroughNonCompose(t *testing.T) {
 	}
 }
 
+func TestRunForProgramPodmanShimInterceptsCompose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	capturePath := filepath.Join(dir, "capture.json")
+	podmanPath := filepath.Join(dir, "real-podman")
+
+	if err := os.WriteFile(envPath, []byte("TOKEN=from-podman-shim\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(podmanPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(podman) error = %v", err)
+	}
+
+	t.Setenv("ENVOYAGE_PODMAN_BIN", podmanPath)
+	t.Setenv("CAPTURE", capturePath)
+
+	err := runForProgram("podman", []string{"compose", "--env-file", envPath, "config"})
+	if err != nil {
+		t.Fatalf("runForProgram(podman compose) error = %v", err)
+	}
+
+	capture := readDockerCapture(t, capturePath)
+	wantArgs := []string{"compose", "config"}
+	if strings.Join(capture.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", capture.Args, wantArgs)
+	}
+	if capture.Token != "from-podman-shim" {
+		t.Fatalf("TOKEN = %q, want podman shim env", capture.Token)
+	}
+}
+
+func TestRunForProgramPodmanShimPassesThroughNonCompose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	capturePath := filepath.Join(dir, "capture.json")
+	podmanPath := filepath.Join(dir, "real-podman")
+
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TOKEN=should-not-load\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(env) error = %v", err)
+	}
+	if err := os.WriteFile(podmanPath, []byte(captureDockerScript), 0o700); err != nil {
+		t.Fatalf("WriteFile(podman) error = %v", err)
+	}
+
+	t.Chdir(dir)
+	t.Setenv("ENVOYAGE_PODMAN_BIN", podmanPath)
+	t.Setenv("CAPTURE", capturePath)
+	t.Setenv("TOKEN", "")
+
+	err := runForProgram("podman", []string{"ps", "--all"})
+	if err != nil {
+		t.Fatalf("runForProgram(podman ps) error = %v", err)
+	}
+
+	capture := readDockerCapture(t, capturePath)
+	wantArgs := []string{"ps", "--all"}
+	if strings.Join(capture.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", capture.Args, wantArgs)
+	}
+	if capture.Token != "" {
+		t.Fatalf("TOKEN = %q, want no default env loading", capture.Token)
+	}
+}
+
 func TestDockerShimNameIncludesWindowsExecutable(t *testing.T) {
 	if !isDockerShimName("docker") {
 		t.Fatal("docker should be treated as a shim name")
@@ -578,6 +649,12 @@ func TestDockerShimNameIncludesWindowsExecutable(t *testing.T) {
 	}
 	if isDockerShimName("envoyage") {
 		t.Fatal("envoyage should not be treated as a docker shim name")
+	}
+	if runtimeName, ok := shimRuntimeName("podman"); !ok || runtimeName != "podman" {
+		t.Fatalf("shimRuntimeName(podman) = %q, %v, want podman true", runtimeName, ok)
+	}
+	if runtimeName, ok := shimRuntimeName("podman.exe"); !ok || runtimeName != "podman" {
+		t.Fatalf("shimRuntimeName(podman.exe) = %q, %v, want podman true", runtimeName, ok)
 	}
 }
 
@@ -604,51 +681,24 @@ func TestInstallStatusAndUninstall(t *testing.T) {
 	}
 	target := filepath.Join(libDir, "envoyage")
 	link := filepath.Join(binDir, "envoyage")
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("ReadFile(target) error = %v", err)
-	}
-	if string(data) != "envoyage-binary\n" {
-		t.Fatalf("installed binary = %q, want source content", data)
-	}
-	linkTarget, err := os.Readlink(link)
-	if err != nil {
-		t.Fatalf("Readlink(link) error = %v", err)
-	}
-	if linkTarget != target {
-		t.Fatalf("link target = %q, want %q", linkTarget, target)
-	}
-	if !strings.Contains(installOut.String(), "installed envoyage") {
-		t.Fatalf("install output = %q, want installed envoyage", installOut.String())
-	}
+	assertFileContent(t, target, "envoyage-binary\n")
+	assertSymlinkTarget(t, link, target)
+	assertContains(t, installOut.String(), "installed envoyage")
 
 	var statusOut bytes.Buffer
 	if err := runStatus([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &statusOut); err != nil {
 		t.Fatalf("runStatus() error = %v", err)
 	}
-	if !strings.Contains(statusOut.String(), "installed binary: yes") {
-		t.Fatalf("status output = %q, want installed binary yes", statusOut.String())
-	}
-	if !strings.Contains(statusOut.String(), "command symlink installed: yes") {
-		t.Fatalf("status output = %q, want command symlink yes", statusOut.String())
-	}
+	assertContains(t, statusOut.String(), "installed binary: yes")
+	assertContains(t, statusOut.String(), "command symlink installed: yes")
 
 	var uninstallOut bytes.Buffer
 	if err := runUninstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &uninstallOut); err != nil {
 		t.Fatalf("runUninstall() error = %v", err)
 	}
-	if !strings.Contains(uninstallOut.String(), "removed command symlink") {
-		t.Fatalf("uninstall output = %q, want removed command symlink", uninstallOut.String())
-	}
-	if !strings.Contains(uninstallOut.String(), "hash -r") {
-		t.Fatalf("uninstall output = %q, want shell refresh guidance", uninstallOut.String())
-	}
-	if _, err := os.Lstat(link); !os.IsNotExist(err) {
-		t.Fatalf("command symlink still exists after uninstall: %v", err)
-	}
-	if _, err := os.Lstat(target); !os.IsNotExist(err) {
-		t.Fatalf("installed binary still exists after uninstall: %v", err)
-	}
+	assertContains(t, uninstallOut.String(), "removed command symlink")
+	assertContains(t, uninstallOut.String(), "hash -r")
+	assertPathsRemoved(t, link, target)
 }
 
 func TestInstallUsesDefaultHomeDirectories(t *testing.T) {
@@ -740,10 +790,10 @@ func TestUninstallWithoutModeRemovesUserAndSystemInstalls(t *testing.T) {
 	if err := runInstall([]string{"--system"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runInstall(system) error = %v", err)
 	}
-	if err := runShim([]string{"install"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(user install) error = %v", err)
 	}
-	if err := runShim([]string{"install", "--system"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker", "--system"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(system install) error = %v", err)
 	}
 
@@ -1046,55 +1096,175 @@ func TestShimInstallStatusAndUninstall(t *testing.T) {
 	}
 
 	var installOut bytes.Buffer
-	if err := runShim([]string{"install", "--bin-dir", binDir}, &installOut); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker", "--bin-dir", binDir}, &installOut); err != nil {
 		t.Fatalf("runShim(install) error = %v", err)
 	}
 	shimPath := filepath.Join(binDir, "docker")
-	linkTarget, err := os.Readlink(shimPath)
-	if err != nil {
-		t.Fatalf("Readlink(shim) error = %v", err)
-	}
-	if linkTarget != installTarget {
-		t.Fatalf("shim target = %q, want %q", linkTarget, installTarget)
-	}
-	if _, err := os.Lstat(installTarget); err != nil {
-		t.Fatalf("envoyage install target missing before shim install: %v", err)
-	}
-	if !strings.Contains(installOut.String(), "installed shim") {
-		t.Fatalf("install output = %q, want installed shim", installOut.String())
-	}
+	assertSymlinkTarget(t, shimPath, installTarget)
+	assertPathExists(t, installTarget)
+	assertContains(t, installOut.String(), "installed docker shim")
 
 	var statusOut bytes.Buffer
-	if err := runShim([]string{"status", "--bin-dir", binDir}, &statusOut); err != nil {
+	if err := runShim([]string{"status", "--runtime", "docker", "--bin-dir", binDir}, &statusOut); err != nil {
 		t.Fatalf("runShim(status) error = %v", err)
 	}
-	if !strings.Contains(statusOut.String(), "installed: yes") {
-		t.Fatalf("status output = %q, want installed yes", statusOut.String())
-	}
-	if !strings.Contains(statusOut.String(), "shim target: "+installTarget) {
-		t.Fatalf("status output = %q, want shim target", statusOut.String())
-	}
+	assertContains(t, statusOut.String(), "installed: yes")
+	assertContains(t, statusOut.String(), "shim target: "+installTarget)
 
 	var secondInstallOut bytes.Buffer
-	if err := runShim([]string{"install", "--bin-dir", binDir}, &secondInstallOut); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker", "--bin-dir", binDir}, &secondInstallOut); err != nil {
 		t.Fatalf("runShim(install existing) error = %v", err)
 	}
-	if !strings.Contains(secondInstallOut.String(), "shim already installed") {
-		t.Fatalf("second install output = %q, want already installed", secondInstallOut.String())
-	}
+	assertContains(t, secondInstallOut.String(), "shim already installed")
 
 	var uninstallOut bytes.Buffer
-	if err := runShim([]string{"uninstall", "--bin-dir", binDir}, &uninstallOut); err != nil {
+	if err := runShim([]string{"uninstall", "--runtime", "docker", "--bin-dir", binDir}, &uninstallOut); err != nil {
 		t.Fatalf("runShim(uninstall) error = %v", err)
 	}
-	if !strings.Contains(uninstallOut.String(), "removed shim") {
-		t.Fatalf("uninstall output = %q, want removed shim", uninstallOut.String())
+	assertContains(t, uninstallOut.String(), "removed shim")
+	assertContains(t, uninstallOut.String(), "hash -r")
+	assertPathsRemoved(t, shimPath)
+}
+
+func TestShimInstallAutoDetectsDockerAndPodman(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
 	}
-	if !strings.Contains(uninstallOut.String(), "hash -r") {
-		t.Fatalf("uninstall output = %q, want shell refresh guidance", uninstallOut.String())
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	realDir := filepath.Join(dir, "real")
+	source := filepath.Join(dir, "envoyage")
+	installTarget := filepath.Join(dir, ".local", "lib", "envoyage", "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(real) error = %v", err)
 	}
-	if _, err := os.Lstat(shimPath); !os.IsNotExist(err) {
-		t.Fatalf("shim still exists after uninstall: %v", err)
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	for _, name := range []string{"docker", "podman"} {
+		if err := os.WriteFile(filepath.Join(realDir, name), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+
+	t.Setenv("PATH", realDir)
+	var out bytes.Buffer
+	if err := runShim([]string{"install", "--bin-dir", binDir}, &out); err != nil {
+		t.Fatalf("runShim(auto install) error = %v", err)
+	}
+
+	assertSymlinkTarget(t, filepath.Join(binDir, "docker"), installTarget)
+	assertSymlinkTarget(t, filepath.Join(binDir, "podman"), installTarget)
+	assertContains(t, out.String(), "installed docker shim")
+	assertContains(t, out.String(), "installed podman shim")
+}
+
+func TestShimInstallAllCreatesDockerAndPodmanWithoutDetection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	source := filepath.Join(dir, "envoyage")
+	installTarget := filepath.Join(dir, ".local", "lib", "envoyage", "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+	t.Setenv("PATH", filepath.Join(dir, "empty"))
+
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runShim([]string{"install", "--runtime", "all", "--bin-dir", binDir}, &out); err != nil {
+		t.Fatalf("runShim(all install) error = %v", err)
+	}
+
+	assertSymlinkTarget(t, filepath.Join(binDir, "docker"), installTarget)
+	assertSymlinkTarget(t, filepath.Join(binDir, "podman"), installTarget)
+	assertContains(t, out.String(), "installed docker shim")
+	assertContains(t, out.String(), "installed podman shim")
+}
+
+func TestShimInstallAutoUsesRuntimeEnvOverrides(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	source := filepath.Join(dir, "envoyage")
+	installTarget := filepath.Join(dir, ".local", "lib", "envoyage", "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+	t.Setenv("PATH", filepath.Join(dir, "empty"))
+	t.Setenv("ENVOYAGE_DOCKER_BIN", "")
+	t.Setenv("ENVOYAGE_PODMAN_BIN", "/custom/podman")
+
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runShim([]string{"install", "--bin-dir", binDir}, &out); err != nil {
+		t.Fatalf("runShim(auto install env override) error = %v", err)
+	}
+
+	assertPathExists(t, filepath.Join(binDir, "podman"))
+	if _, err := os.Lstat(filepath.Join(binDir, "docker")); !os.IsNotExist(err) {
+		t.Fatalf("docker shim should not be installed when only podman is detected: %v", err)
+	}
+	assertSymlinkTarget(t, filepath.Join(binDir, "podman"), installTarget)
+	assertContains(t, out.String(), "installed podman shim")
+}
+
+func TestShimInstallAutoRequiresDetectedRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit checks are different on Windows")
+	}
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+	t.Setenv("PATH", filepath.Join(dir, "empty"))
+	t.Setenv("ENVOYAGE_DOCKER_BIN", "")
+	t.Setenv("ENVOYAGE_PODMAN_BIN", "")
+
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+
+	err := runShim([]string{"install", "--bin-dir", filepath.Join(dir, "bin")}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(auto install without runtime) error = nil, want error")
+	}
+	assertContains(t, err.Error(), "no supported runtime found")
+}
+
+func TestShimRejectsUnsupportedRuntime(t *testing.T) {
+	tests := [][]string{
+		{"install", "--runtime", "nerdctl"},
+		{"status", "--runtime", "nerdctl"},
+		{"uninstall", "--runtime", "nerdctl"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := runShim(args, &bytes.Buffer{})
+			if err == nil {
+				t.Fatal("runShim() error = nil, want unsupported runtime error")
+			}
+			assertContains(t, err.Error(), `unsupported shim runtime "nerdctl"`)
+		})
 	}
 }
 
@@ -1122,7 +1292,7 @@ func TestShimInstallForceRecreatesExistingShim(t *testing.T) {
 		t.Fatalf("Symlink(existing shim) error = %v", err)
 	}
 
-	if err := runShim([]string{"install", "--bin-dir", binDir, "--force"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker", "--bin-dir", binDir, "--force"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(install force) error = %v", err)
 	}
 	linkTarget, err := os.Readlink(shimPath)
@@ -1141,7 +1311,7 @@ func TestShimUninstallMissingIsNoop(t *testing.T) {
 	osExecutable = func() (string, error) { return source, nil }
 
 	var out bytes.Buffer
-	if err := runShim([]string{"uninstall", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
+	if err := runShim([]string{"uninstall", "--runtime", "docker", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
 		t.Fatalf("runShim(uninstall missing) error = %v", err)
 	}
 	if !strings.Contains(out.String(), "shim not installed") {
@@ -1172,7 +1342,7 @@ func TestShimRefusesNonEnvoyageDocker(t *testing.T) {
 		t.Fatalf("WriteFile(existing docker) error = %v", err)
 	}
 
-	err := runShim([]string{"install", "--bin-dir", binDir, "--force"}, &bytes.Buffer{})
+	err := runShim([]string{"install", "--runtime", "docker", "--bin-dir", binDir, "--force"}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("runShim(install non-envoyage) error = nil, want refusal")
 	}
@@ -1180,13 +1350,49 @@ func TestShimRefusesNonEnvoyageDocker(t *testing.T) {
 		t.Fatalf("install error = %q, want overwrite refusal", err.Error())
 	}
 
-	err = runShim([]string{"uninstall", "--bin-dir", binDir}, &bytes.Buffer{})
+	err = runShim([]string{"uninstall", "--runtime", "docker", "--bin-dir", binDir}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("runShim(uninstall non-envoyage) error = nil, want refusal")
 	}
 	if !strings.Contains(err.Error(), "refusing to remove non-Envoyage docker") {
 		t.Fatalf("uninstall error = %q, want remove refusal", err.Error())
 	}
+}
+
+func TestShimRefusesNonEnvoyagePodman(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	source := filepath.Join(dir, "envoyage")
+	shimPath := filepath.Join(binDir, "podman")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(existing podman) error = %v", err)
+	}
+
+	err := runShim([]string{"install", "--runtime", "podman", "--bin-dir", binDir, "--force"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(install non-envoyage podman) error = nil, want refusal")
+	}
+	assertContains(t, err.Error(), "refusing to overwrite non-Envoyage podman")
+
+	err = runShim([]string{"uninstall", "--runtime", "podman", "--bin-dir", binDir}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runShim(uninstall non-envoyage podman) error = nil, want refusal")
+	}
+	assertContains(t, err.Error(), "refusing to remove non-Envoyage podman")
 }
 
 func TestShimStatusWithDockerBinEnv(t *testing.T) {
@@ -1201,12 +1407,34 @@ func TestShimStatusWithDockerBinEnv(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runShim([]string{"status", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
+	if err := runShim([]string{"status", "--runtime", "docker", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
 		t.Fatalf("runShim(status) error = %v", err)
 	}
 	if !strings.Contains(out.String(), "ENVOYAGE_DOCKER_BIN: /custom/docker") {
 		t.Fatalf("status output = %q, want configured docker bin", out.String())
 	}
+}
+
+func TestShimStatusAutoReportsDockerAndPodman(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	t.Setenv("ENVOYAGE_DOCKER_BIN", "/custom/docker")
+	t.Setenv("ENVOYAGE_PODMAN_BIN", "/custom/podman")
+
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runShim([]string{"status", "--bin-dir", filepath.Join(dir, "bin")}, &out); err != nil {
+		t.Fatalf("runShim(status auto) error = %v", err)
+	}
+	assertContains(t, out.String(), "runtime: docker")
+	assertContains(t, out.String(), "runtime: podman")
+	assertContains(t, out.String(), "ENVOYAGE_DOCKER_BIN: /custom/docker")
+	assertContains(t, out.String(), "ENVOYAGE_PODMAN_BIN: /custom/podman")
 }
 
 func TestShimUsesDefaultHomeBinDir(t *testing.T) {
@@ -1225,7 +1453,7 @@ func TestShimUsesDefaultHomeBinDir(t *testing.T) {
 		t.Fatalf("WriteFile(target) error = %v", err)
 	}
 
-	if err := runShim([]string{"install"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(default install) error = %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, ".local", "bin", "docker")); err != nil {
@@ -1258,7 +1486,7 @@ func TestShimUsesSystemBinDir(t *testing.T) {
 	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(target) error = %v", err)
 	}
-	if err := runShim([]string{"install", "--system"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker", "--system"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(system install) error = %v", err)
 	}
 	linkTarget, err := os.Readlink(filepath.Join(systemBinDir, "docker"))
@@ -1290,10 +1518,10 @@ func TestShimUninstallWithoutModeRemovesUserAndSystemShims(t *testing.T) {
 	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(target) error = %v", err)
 	}
-	if err := runShim([]string{"install"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(user install) error = %v", err)
 	}
-	if err := runShim([]string{"install", "--system"}, &bytes.Buffer{}); err != nil {
+	if err := runShim([]string{"install", "--runtime", "docker", "--system"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("runShim(system install) error = %v", err)
 	}
 
@@ -1314,15 +1542,51 @@ func TestShimUninstallWithoutModeRemovesUserAndSystemShims(t *testing.T) {
 	}
 }
 
+func TestShimUninstallAllRemovesDockerAndPodman(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	source := filepath.Join(dir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := runShim([]string{"install", "--runtime", "all", "--bin-dir", binDir}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runShim(all install) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runShim([]string{"uninstall", "--runtime", "all", "--bin-dir", binDir}, &out); err != nil {
+		t.Fatalf("runShim(all uninstall) error = %v", err)
+	}
+
+	assertPathsRemoved(t, filepath.Join(binDir, "docker"), filepath.Join(binDir, "podman"))
+	assertContains(t, out.String(), "removed shim: "+filepath.Join(binDir, "docker"))
+	assertContains(t, out.String(), "removed shim: "+filepath.Join(binDir, "podman"))
+}
+
 func TestShimSystemRejectsCustomBinDir(t *testing.T) {
 	dir := t.TempDir()
 
-	err := runShim([]string{"install", "--system", "--bin-dir", filepath.Join(dir, "bin")}, &bytes.Buffer{})
-	if err == nil {
-		t.Fatal("runShim(system custom bin) error = nil, want conflict")
+	tests := [][]string{
+		{"install", "--runtime", "docker", "--system", "--bin-dir", filepath.Join(dir, "bin")},
+		{"status", "--runtime", "docker", "--system", "--bin-dir", filepath.Join(dir, "bin")},
+		{"uninstall", "--runtime", "docker", "--system", "--bin-dir", filepath.Join(dir, "bin")},
 	}
-	if !strings.Contains(err.Error(), "--system cannot be combined") {
-		t.Fatalf("shim error = %q, want system conflict", err.Error())
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := runShim(args, &bytes.Buffer{})
+			if err == nil {
+				t.Fatal("runShim(system custom bin) error = nil, want conflict")
+			}
+			assertContains(t, err.Error(), "--system cannot be combined")
+		})
 	}
 }
 
@@ -1428,8 +1692,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.2.1\n" {
-				t.Fatalf("version output = %q, want envoyage 0.2.1", output)
+			if output != "envoyage 0.3.0\n" {
+				t.Fatalf("version output = %q, want envoyage 0.3.0", output)
 			}
 		})
 	}
@@ -1442,6 +1706,88 @@ func TestRunVersionRejectsExtraArgs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "version does not accept arguments") {
 		t.Fatalf("error = %q, want extra argument error", err.Error())
+	}
+}
+
+func TestRunEnvExtractAndInline(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(`services:
+  app:
+    environment:
+      APP_ENV: production
+      DB_PASSWORD: secret-password
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(compose) error = %v", err)
+	}
+
+	var dryRunOut bytes.Buffer
+	if err := runEnv([]string{"extract"}, &dryRunOut); err != nil {
+		t.Fatalf("runEnv(extract) error = %v", err)
+	}
+	if !strings.Contains(dryRunOut.String(), "dry-run") {
+		t.Fatalf("extract output = %q, want dry-run guidance", dryRunOut.String())
+	}
+	if strings.Contains(dryRunOut.String(), "secret-password") {
+		t.Fatalf("extract output leaked secret: %q", dryRunOut.String())
+	}
+
+	var extractOut bytes.Buffer
+	if err := runEnv([]string{"extract", "--write"}, &extractOut); err != nil {
+		t.Fatalf("runEnv(extract write) error = %v", err)
+	}
+	if !strings.Contains(extractOut.String(), ".secrets.env") {
+		t.Fatalf("extract write output = %q, want secrets file section", extractOut.String())
+	}
+
+	var inlineOut bytes.Buffer
+	if err := runEnv([]string{"inline", "--out", "compose.inline.yaml"}, &inlineOut); err != nil {
+		t.Fatalf("runEnv(inline) error = %v", err)
+	}
+	if !strings.Contains(inlineOut.String(), "compose updates") {
+		t.Fatalf("inline output = %q, want compose updates", inlineOut.String())
+	}
+	rendered, err := os.ReadFile(filepath.Join(dir, "compose.inline.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(rendered) error = %v", err)
+	}
+	if !strings.Contains(string(rendered), "DB_PASSWORD: secret-password") {
+		t.Fatalf("rendered compose = %q, want inlined secret", rendered)
+	}
+}
+
+func TestRunEnvRejectsInvalidUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "unknown",
+			args: []string{"unknown"},
+			want: `unknown env command "unknown"`,
+		},
+		{
+			name: "extract positional",
+			args: []string{"extract", "extra"},
+			want: "env extract does not accept positional arguments",
+		},
+		{
+			name: "inline missing out",
+			args: []string{"inline"},
+			want: "--out is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runEnv(tt.args, &bytes.Buffer{})
+			if err == nil {
+				t.Fatal("runEnv() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
 	}
 }
 
@@ -1678,6 +2024,46 @@ func assertPathsRemoved(t *testing.T, paths ...string) {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists after uninstall: %v", path, err)
 		}
+	}
+}
+
+func assertPathExists(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("%s should exist: %v", path, err)
+	}
+}
+
+func assertFileContent(t *testing.T, path string, want string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("%s = %q, want %q", path, data, want)
+	}
+}
+
+func assertSymlinkTarget(t *testing.T, path string, want string) {
+	t.Helper()
+
+	target, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("Readlink(%s) error = %v", path, err)
+	}
+	if target != want {
+		t.Fatalf("%s target = %q, want %q", path, target, want)
+	}
+}
+
+func assertContains(t *testing.T, got string, want string) {
+	t.Helper()
+
+	if !strings.Contains(got, want) {
+		t.Fatalf("%q does not contain %q", got, want)
 	}
 }
 
