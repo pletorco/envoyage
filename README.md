@@ -693,6 +693,7 @@ With [go-task](https://taskfile.dev/):
 task check
 task build
 task test
+task test:e2e
 task coverage
 task smoke:crypto
 task scan:cve
@@ -700,6 +701,10 @@ task sonar
 ```
 
 `task build` embeds the version from `Taskfile.yml` into the binary.
+
+`task test:e2e` builds a temporary Envoyage binary and runs end-to-end tests
+against fake Docker and Podman runtime scripts. It does not require a Docker or
+Podman daemon.
 
 `task scan:cve` requires Trivy. It uses an installed `govulncheck` binary when
 available, otherwise it runs `golang.org/x/vuln/cmd/govulncheck` through
