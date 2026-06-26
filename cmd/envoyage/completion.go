@@ -86,7 +86,7 @@ _envoyage()
             flags="--out -o --force"
             ;;
         shim)
-            flags="status install uninstall --system --bin-dir --force"
+            flags="status install uninstall --runtime auto docker podman all --system --bin-dir --force"
             ;;
         status|uninstall)
             flags="--system --bin-dir --lib-dir"
@@ -112,7 +112,7 @@ _envoyage() {
     'env:extract or inline Compose environment values'
     'install:install Envoyage'
     'keygen:generate an age identity'
-    'shim:manage optional docker shim'
+    'shim:manage optional Docker/Podman shims'
     'status:show Envoyage install status'
     'uninstall:remove Envoyage install'
     'version:print Envoyage version'
@@ -150,7 +150,7 @@ _envoyage() {
           _arguments '--out[age identity output path]:output:_files' '-o[age identity output path]:output:_files' '--force[overwrite identity file]'
           ;;
         shim)
-          _arguments '1:shim command:(status install uninstall)' '--system[use system-wide /usr/local/bin path]' '--bin-dir[docker shim symlink directory]:directory:_files -/' '--force[recreate shim]'
+          _arguments '1:shim command:(status install uninstall)' '--runtime[runtime shim to manage]:runtime:(auto docker podman all)' '--system[use system-wide /usr/local/bin path]' '--bin-dir[runtime shim symlink directory]:directory:_files -/' '--force[recreate shim]'
           ;;
         status|uninstall)
           _arguments '--system[use system-wide /usr/local paths]' '--bin-dir[command symlink directory]:directory:_files -/' '--lib-dir[binary install directory]:directory:_files -/'
@@ -171,7 +171,7 @@ complete -c envoyage -f -n "__fish_use_subcommand" -a "encrypt" -d "Encrypt .sec
 complete -c envoyage -f -n "__fish_use_subcommand" -a "env" -d "Extract or inline Compose environment values"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "install" -d "Install Envoyage"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "keygen" -d "Generate an age identity"
-complete -c envoyage -f -n "__fish_use_subcommand" -a "shim" -d "Manage optional docker shim"
+complete -c envoyage -f -n "__fish_use_subcommand" -a "shim" -d "Manage optional Docker/Podman shims"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "status" -d "Show Envoyage install status"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "uninstall" -d "Remove Envoyage install"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "version" -d "Print Envoyage version"
@@ -205,7 +205,8 @@ complete -c envoyage -n "__fish_seen_subcommand_from install" -l force -d "Overw
 complete -c envoyage -n "__fish_seen_subcommand_from keygen" -l out -s o -r -F -d "Age identity output path"
 complete -c envoyage -n "__fish_seen_subcommand_from keygen" -l force -d "Overwrite identity file"
 complete -c envoyage -n "__fish_seen_subcommand_from shim" -f -a "status install uninstall"
-complete -c envoyage -n "__fish_seen_subcommand_from shim" -l bin-dir -r -F -d "Docker shim symlink directory"
+complete -c envoyage -n "__fish_seen_subcommand_from shim" -l bin-dir -r -F -d "Runtime shim symlink directory"
+complete -c envoyage -n "__fish_seen_subcommand_from shim" -l runtime -x -a "auto docker podman all" -d "Runtime shim to manage"
 complete -c envoyage -n "__fish_seen_subcommand_from shim" -l system -d "Use system-wide /usr/local/bin path"
 complete -c envoyage -n "__fish_seen_subcommand_from shim" -l force -d "Recreate shim"
 `
@@ -232,7 +233,7 @@ Register-ArgumentCompleter -Native -CommandName envoyage -ScriptBlock {
         'env' { @('extract','inline','--compose','--write','--env','--secrets-env','--secrets','--out','-o','--env-file','--identity','-i','--force') }
         'install' { @('--system','--bin-dir','--lib-dir','--force') }
         'keygen' { @('--out','-o','--force') }
-        'shim' { @('status','install','uninstall','--system','--bin-dir','--force') }
+        'shim' { @('status','install','uninstall','--runtime','auto','docker','podman','all','--system','--bin-dir','--force') }
         { $_ -in @('status','uninstall') } { @('--system','--bin-dir','--lib-dir') }
         default { @() }
     }

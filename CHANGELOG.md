@@ -8,6 +8,8 @@ All notable changes to Envoyage are documented in this file.
 
 - Added `envoyage env extract` and `envoyage env inline` for migrating Compose
   fixed environment values to and from dotenv files.
+- Added automatic Docker/Podman shim runtime detection with
+  `envoyage shim install --runtime auto`.
 
 ### Changed
 

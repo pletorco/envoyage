@@ -87,7 +87,7 @@ tasks:
         test ! -e "$tmpdir/lib/envoyage/envoyage"
 
   smoke:shim:
-    desc: Run the optional docker shim mode without invoking Docker
+    desc: Run the optional runtime shim mode without invoking Docker
     deps:
       - build
     cmds:

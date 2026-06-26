@@ -527,39 +527,53 @@ The default command shape is:
 envoyage compose up -d
 ```
 
-## Optional Docker Shim Mode
+## Optional Docker/Podman Shim Mode
 
-Envoyage can also run as an optional Docker shim. This mode is disabled unless
-the Envoyage binary is executed with the name `docker`, usually through a
-symlink placed earlier in `PATH` than the real Docker CLI.
+Envoyage can also run as an optional Docker or Podman shim. This mode is
+disabled unless the Envoyage binary is executed with the name `docker` or
+`podman`, usually through a symlink placed earlier in `PATH` than the real
+runtime CLI.
 
-In shim mode, only `docker compose ...` is intercepted by Envoyage. Other Docker
-commands are passed through to the real Docker binary:
+In shim mode, only `docker compose ...` and `podman compose ...` are intercepted
+by Envoyage. Other runtime commands are passed through to the real binary:
 
 ```bash
 docker ps
 docker version
+podman ps
+podman version
 ```
 
-Create a user-local shim:
+Create user-local shims for the runtimes detected on `PATH`:
 
 ```bash
 envoyage shim install
 ```
 
 `envoyage shim install` first ensures Envoyage itself is installed to a stable
-location, then creates the `docker` shim symlink to that installed binary. For
-the default user-local mode, the shim points to
-`~/.local/lib/envoyage/envoyage`. With `--system`, it points to
-`/usr/local/lib/envoyage/envoyage`. Use `--force` when you intentionally want to
-refresh both the installed Envoyage binary and the shim symlink.
+location, then creates `docker` and/or `podman` shim symlinks to that installed
+binary. The default `--runtime auto` mode creates shims only for runtimes that
+are detected. You can be explicit when needed:
 
-Put `~/.local/bin` before the real Docker directory in `PATH`, and point
-Envoyage at the real Docker binary:
+```bash
+envoyage shim install --runtime docker
+envoyage shim install --runtime podman
+envoyage shim install --runtime all
+```
+
+For the default user-local mode, each shim points to
+`~/.local/lib/envoyage/envoyage`. With `--system`, shims point to
+`/usr/local/lib/envoyage/envoyage`. Use `--force` when you intentionally want to
+refresh both the installed Envoyage binary and the Envoyage-managed shim
+symlinks.
+
+Put `~/.local/bin` before the real runtime directory in `PATH`, and optionally
+point Envoyage at the real runtime binaries:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 export ENVOYAGE_DOCKER_BIN=/usr/bin/docker
+export ENVOYAGE_PODMAN_BIN=/usr/bin/podman
 ```
 
 Check the current shim state:
@@ -574,9 +588,16 @@ Then Compose can be run with the Docker-shaped command:
 docker compose --env-file .env.age up -d
 ```
 
-If `ENVOYAGE_DOCKER_BIN` is not set, shim mode searches `PATH` for the next
-executable named `docker` that is not the Envoyage shim itself. Setting
-`ENVOYAGE_DOCKER_BIN` explicitly is recommended because it avoids ambiguity.
+Or with Podman when `podman compose` is available:
+
+```bash
+podman compose --env-file .env.age up -d
+```
+
+If `ENVOYAGE_DOCKER_BIN` or `ENVOYAGE_PODMAN_BIN` is not set, shim mode searches
+`PATH` for the next executable named `docker` or `podman` that is not the
+Envoyage shim itself. Setting the runtime binary explicitly is recommended
+because it avoids ambiguity.
 
 Remove the shim when you no longer want Docker-shaped interception:
 
@@ -586,10 +607,11 @@ hash -r
 ```
 
 By default, `envoyage shim uninstall` checks both the user-local shim path and
-the system-wide shim path, then removes only Envoyage-managed shim symlinks. Use
-`--system` or `--bin-dir` only when you want to target one location explicitly.
-The user-local path is resolved from the current process user, so
-`sudo envoyage shim uninstall` checks root's home plus the system-wide path.
+the system-wide shim path for both Docker and Podman, then removes only
+Envoyage-managed shim symlinks. Use `--runtime docker|podman|all`, `--system`,
+or `--bin-dir` only when you want to target one runtime or location explicitly.
+The user-local path is resolved from the current process user, so `sudo envoyage
+shim uninstall` checks root's home plus the system-wide path.
 
 For a system-wide shim under `/usr/local/bin`, run:
 
@@ -602,13 +624,13 @@ hash -r
 ```
 
 System-wide shim mode first installs Envoyage under `/usr/local/lib/envoyage`,
-then creates `/usr/local/bin/docker` as a symlink to that installed binary. It
-still refuses to overwrite an existing non-Envoyage `docker` file, even with
-`--force`.
+then creates `/usr/local/bin/docker` and/or `/usr/local/bin/podman` as symlinks
+to that installed binary. It still refuses to overwrite existing non-Envoyage
+runtime files, even with `--force`.
 
-`envoyage shim install` refuses to overwrite an existing non-Envoyage `docker`
-file, even with `--force`. `--force` only recreates a shim symlink that already
-points at the current Envoyage binary.
+`envoyage shim install` refuses to overwrite an existing non-Envoyage runtime
+file, even with `--force`. `--force` only recreates shim symlinks that already
+point at Envoyage.
 
 ## Security Model and Limits
 

@@ -20,9 +20,27 @@ var (
 )
 
 const (
-	shimBinDirFlag  = "bin-dir"
-	shimBinDirUsage = "directory where the docker shim symlink is installed"
+	shimBinDirFlag    = "bin-dir"
+	shimBinDirUsage   = "directory where runtime shim symlinks are installed"
+	shimRuntimeFlag   = "runtime"
+	shimRuntimeUsage  = "runtime shim to manage: auto, docker, podman, or all"
+	shimRuntimeAuto   = "auto"
+	shimRuntimeAll    = "all"
+	shimRuntimeDocker = "docker"
+	shimRuntimePodman = "podman"
 )
+
+var supportedShimRuntimes = []string{shimRuntimeDocker, shimRuntimePodman}
+
+type shimInstallRequest struct {
+	BinDir         string
+	System         bool
+	BinDirProvided bool
+	Target         string
+	ManagedTargets []string
+	Force          bool
+	Stdout         io.Writer
+}
 
 func runShim(args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
@@ -46,11 +64,13 @@ func runShimInstall(args []string, stdout io.Writer) error {
 	var binDir string
 	var force bool
 	var system bool
+	var runtimeName string
 
 	flags := flag.NewFlagSet("shim install", flag.ContinueOnError)
 	flags.StringVar(&binDir, shimBinDirFlag, defaultShimBinDir, shimBinDirUsage)
+	flags.StringVar(&runtimeName, shimRuntimeFlag, shimRuntimeAuto, shimRuntimeUsage)
 	flags.BoolVar(&force, "force", false, "recreate an existing Envoyage-managed shim symlink")
-	flags.BoolVar(&system, "system", false, "install the docker shim to /usr/local/bin")
+	flags.BoolVar(&system, "system", false, "install runtime shims to /usr/local/bin")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -59,7 +79,7 @@ func runShimInstall(args []string, stdout io.Writer) error {
 	}
 
 	binDirProvided := flagProvided(flags, shimBinDirFlag)
-	shimPath, err := dockerShimPathForMode(binDir, system, binDirProvided)
+	runtimes, err := shimInstallRuntimes(runtimeName, binDir, system, binDirProvided)
 	if err != nil {
 		return err
 	}
@@ -70,27 +90,61 @@ func runShimInstall(args []string, stdout io.Writer) error {
 	if err := ensureShimEnvoyageInstall(installPaths, force, stdout); err != nil {
 		return err
 	}
-	managedTargets := shimManagedTargets(installPaths.Target)
 
-	if err := mkdirAll(filepath.Dir(shimPath), 0o755); err != nil {
-		return fmt.Errorf("create shim directory %s: %w", filepath.Dir(shimPath), err)
-	}
-
-	shouldInstall, err := prepareShimInstall(shimPath, installPaths.Target, managedTargets, force, stdout)
+	installedAny, err := installRuntimeShims(runtimes, binDir, system, binDirProvided, installPaths.Target, force, stdout)
 	if err != nil {
 		return err
 	}
-	if !shouldInstall {
-		return nil
+	if installedAny {
+		printShimActivation(stdout, shimBinDirForMode(binDir, system), runtimes)
 	}
-
-	if err := os.Symlink(installPaths.Target, shimPath); err != nil {
-		return fmt.Errorf("create docker shim %s -> %s: %w", shimPath, installPaths.Target, err)
-	}
-
-	fmt.Fprintf(stdout, "installed shim: %s -> %s\n", shimPath, installPaths.Target)
-	printShimActivation(stdout, filepath.Dir(shimPath), "")
 	return nil
+}
+
+func installRuntimeShims(runtimes []string, binDir string, system bool, binDirProvided bool, target string, force bool, stdout io.Writer) (bool, error) {
+	installedAny := false
+	request := shimInstallRequest{
+		BinDir:         binDir,
+		System:         system,
+		BinDirProvided: binDirProvided,
+		Target:         target,
+		ManagedTargets: shimManagedTargets(target),
+		Force:          force,
+		Stdout:         stdout,
+	}
+	for _, runtimeName := range runtimes {
+		installed, err := installRuntimeShim(runtimeName, request)
+		if err != nil {
+			return false, err
+		}
+		if installed {
+			installedAny = true
+		}
+	}
+	return installedAny, nil
+}
+
+func installRuntimeShim(runtimeName string, request shimInstallRequest) (bool, error) {
+	shimPath, err := runtimeShimPathForMode(runtimeName, request.BinDir, request.System, request.BinDirProvided)
+	if err != nil {
+		return false, err
+	}
+	if err := mkdirAll(filepath.Dir(shimPath), 0o755); err != nil {
+		return false, fmt.Errorf("create shim directory %s: %w", filepath.Dir(shimPath), err)
+	}
+
+	shouldInstall, err := prepareShimInstall(runtimeName, shimPath, request.Target, request.ManagedTargets, request.Force, request.Stdout)
+	if err != nil {
+		return false, err
+	}
+	if !shouldInstall {
+		return false, nil
+	}
+	if err := os.Symlink(request.Target, shimPath); err != nil {
+		return false, fmt.Errorf("create %s shim %s -> %s: %w", runtimeName, shimPath, request.Target, err)
+	}
+	fmt.Fprintf(request.Stdout, "installed %s shim: %s -> %s\n", runtimeName, shimPath, request.Target)
+	return true, nil
 }
 
 func shimEnvoyageInstallPaths(system bool) (installPaths, error) {
@@ -136,7 +190,7 @@ func ensureShimEnvoyageInstall(paths installPaths, force bool, stdout io.Writer)
 	return nil
 }
 
-func prepareShimInstall(shimPath string, target string, managedTargets []string, force bool, stdout io.Writer) (bool, error) {
+func prepareShimInstall(runtimeName string, shimPath string, target string, managedTargets []string, force bool, stdout io.Writer) (bool, error) {
 	installed, err := isEnvoyageShimAny(shimPath, managedTargets)
 	if err != nil {
 		return false, err
@@ -148,14 +202,14 @@ func prepareShimInstall(shimPath string, target string, managedTargets []string,
 			}
 		} else {
 			fmt.Fprintf(stdout, "shim already installed: %s -> %s\n", shimPath, target)
-			printShimActivation(stdout, filepath.Dir(shimPath), "")
+			printShimActivation(stdout, filepath.Dir(shimPath), []string{runtimeName})
 			return false, nil
 		}
 		return true, nil
 	}
 
 	if _, err := os.Lstat(shimPath); err == nil {
-		return false, fmt.Errorf("refusing to overwrite non-Envoyage docker at %s", shimPath)
+		return false, fmt.Errorf("refusing to overwrite non-Envoyage %s at %s", runtimeName, shimPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("inspect shim path %s: %w", shimPath, err)
 	}
@@ -166,10 +220,12 @@ func prepareShimInstall(shimPath string, target string, managedTargets []string,
 func runShimUninstall(args []string, stdout io.Writer) error {
 	var binDir string
 	var system bool
+	var runtimeName string
 
 	flags := flag.NewFlagSet("shim uninstall", flag.ContinueOnError)
 	flags.StringVar(&binDir, shimBinDirFlag, defaultShimBinDir, shimBinDirUsage)
-	flags.BoolVar(&system, "system", false, "remove the docker shim from /usr/local/bin")
+	flags.StringVar(&runtimeName, shimRuntimeFlag, shimRuntimeAuto, shimRuntimeUsage)
+	flags.BoolVar(&system, "system", false, "remove runtime shims from /usr/local/bin")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -178,38 +234,36 @@ func runShimUninstall(args []string, stdout io.Writer) error {
 	}
 
 	binDirProvided := flagProvided(flags, shimBinDirFlag)
+	runtimes, err := shimInspectionRuntimes(runtimeName)
+	if err != nil {
+		return err
+	}
 	if !system && !binDirProvided {
-		if err := uninstallDefaultShimPaths(stdout); err != nil {
+		if err := uninstallDefaultShimPaths(runtimes, stdout); err != nil {
 			return err
 		}
 		printShellHashRefresh(stdout)
 		return nil
 	}
 
-	shimPath, err := dockerShimPathForMode(binDir, system, binDirProvided)
-	if err != nil {
-		return err
-	}
 	installPaths, err := shimEnvoyageInstallPaths(system)
 	if err != nil {
 		return err
 	}
-	if err := uninstallShimPath(shimPath, shimManagedTargets(installPaths.Target), stdout); err != nil {
-		return err
+	for _, runtimeName := range runtimes {
+		shimPath, err := runtimeShimPathForMode(runtimeName, binDir, system, binDirProvided)
+		if err != nil {
+			return err
+		}
+		if err := uninstallShimPath(runtimeName, shimPath, shimManagedTargets(installPaths.Target), stdout); err != nil {
+			return err
+		}
 	}
 	printShellHashRefresh(stdout)
 	return nil
 }
 
-func uninstallDefaultShimPaths(stdout io.Writer) error {
-	userShimPath, err := dockerShimPath(defaultShimBinDir)
-	if err != nil {
-		return err
-	}
-	systemShimPath, err := dockerShimPath(defaultSystemShimBinDir)
-	if err != nil {
-		return err
-	}
+func uninstallDefaultShimPaths(runtimes []string, stdout io.Writer) error {
 	userInstallPaths, err := shimEnvoyageInstallPaths(false)
 	if err != nil {
 		return err
@@ -218,21 +272,32 @@ func uninstallDefaultShimPaths(stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, candidate := range []struct {
-		shimPath string
-		targets  []string
-	}{
-		{shimPath: userShimPath, targets: shimManagedTargets(userInstallPaths.Target)},
-		{shimPath: systemShimPath, targets: shimManagedTargets(systemInstallPaths.Target)},
-	} {
-		if err := uninstallShimPath(candidate.shimPath, candidate.targets, stdout); err != nil {
+
+	for _, runtimeName := range runtimes {
+		userShimPath, err := runtimeShimPath(runtimeName, defaultShimBinDir)
+		if err != nil {
 			return err
+		}
+		systemShimPath, err := runtimeShimPath(runtimeName, defaultSystemShimBinDir)
+		if err != nil {
+			return err
+		}
+		for _, candidate := range []struct {
+			shimPath string
+			targets  []string
+		}{
+			{shimPath: userShimPath, targets: shimManagedTargets(userInstallPaths.Target)},
+			{shimPath: systemShimPath, targets: shimManagedTargets(systemInstallPaths.Target)},
+		} {
+			if err := uninstallShimPath(runtimeName, candidate.shimPath, candidate.targets, stdout); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func uninstallShimPath(shimPath string, managedTargets []string, stdout io.Writer) error {
+func uninstallShimPath(runtimeName string, shimPath string, managedTargets []string, stdout io.Writer) error {
 	installed, err := isEnvoyageShimAny(shimPath, managedTargets)
 	if err != nil {
 		return err
@@ -242,7 +307,7 @@ func uninstallShimPath(shimPath string, managedTargets []string, stdout io.Write
 			fmt.Fprintf(stdout, "shim not installed: %s\n", shimPath)
 			return nil
 		}
-		return fmt.Errorf("refusing to remove non-Envoyage docker at %s", shimPath)
+		return fmt.Errorf("refusing to remove non-Envoyage %s at %s", runtimeName, shimPath)
 	}
 
 	if err := os.Remove(shimPath); err != nil {
@@ -275,10 +340,12 @@ func uninstallShimPathIfManaged(shimPath string, managedTargets []string, stdout
 func runShimStatus(args []string, stdout io.Writer) error {
 	var binDir string
 	var system bool
+	var runtimeName string
 
 	flags := flag.NewFlagSet("shim status", flag.ContinueOnError)
 	flags.StringVar(&binDir, shimBinDirFlag, defaultShimBinDir, shimBinDirUsage)
-	flags.BoolVar(&system, "system", false, "show the docker shim status under /usr/local/bin")
+	flags.StringVar(&runtimeName, shimRuntimeFlag, shimRuntimeAuto, shimRuntimeUsage)
+	flags.BoolVar(&system, "system", false, "show runtime shim status under /usr/local/bin")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -286,29 +353,39 @@ func runShimStatus(args []string, stdout io.Writer) error {
 		return fmt.Errorf("shim status does not accept arguments")
 	}
 
-	shimPath, err := dockerShimPathForMode(binDir, system, flagProvided(flags, shimBinDirFlag))
-	if err != nil {
-		return err
-	}
 	installPaths, err := shimEnvoyageInstallPaths(system)
 	if err != nil {
 		return err
 	}
-	installed, err := isEnvoyageShimAny(shimPath, shimManagedTargets(installPaths.Target))
+	runtimes, err := shimInspectionRuntimes(runtimeName)
 	if err != nil {
 		return err
 	}
 
-	printShimStatus(stdout, shimPath, installPaths.Target, installed)
-	printDockerResolution(stdout, shimPath)
+	for i, runtimeName := range runtimes {
+		if i > 0 {
+			fmt.Fprintln(stdout)
+		}
+		shimPath, err := runtimeShimPathForMode(runtimeName, binDir, system, flagProvided(flags, shimBinDirFlag))
+		if err != nil {
+			return err
+		}
+		installed, err := isEnvoyageShimAny(shimPath, shimManagedTargets(installPaths.Target))
+		if err != nil {
+			return err
+		}
 
-	if installed {
-		printShimActivation(stdout, filepath.Dir(shimPath), os.Getenv("ENVOYAGE_DOCKER_BIN"))
+		printShimStatus(stdout, runtimeName, shimPath, installPaths.Target, installed)
+		printRuntimeResolution(stdout, runtimeName, shimPath)
+		if installed {
+			printShimActivation(stdout, filepath.Dir(shimPath), []string{runtimeName})
+		}
 	}
 	return nil
 }
 
-func printShimStatus(stdout io.Writer, shimPath string, target string, installed bool) {
+func printShimStatus(stdout io.Writer, runtimeName string, shimPath string, target string, installed bool) {
+	fmt.Fprintf(stdout, "runtime: %s\n", runtimeName)
 	fmt.Fprintf(stdout, "shim path: %s\n", shimPath)
 	fmt.Fprintf(stdout, "envoyage target: %s\n", target)
 	if installed {
@@ -323,41 +400,110 @@ func printShimStatus(stdout io.Writer, shimPath string, target string, installed
 }
 
 func printDockerResolution(stdout io.Writer, shimPath string) {
-	if pathDocker, err := exec.LookPath("docker"); err == nil {
-		fmt.Fprintf(stdout, "PATH docker: %s\n", pathDocker)
+	printRuntimeResolution(stdout, shimRuntimeDocker, shimPath)
+}
+
+func printRuntimeResolution(stdout io.Writer, runtimeName string, shimPath string) {
+	if pathRuntime, err := exec.LookPath(runtimeName); err == nil {
+		fmt.Fprintf(stdout, "PATH %s: %s\n", runtimeName, pathRuntime)
 	} else {
-		fmt.Fprintln(stdout, "PATH docker: not found")
+		fmt.Fprintf(stdout, "PATH %s: not found\n", runtimeName)
 	}
 
-	dockerBin := os.Getenv("ENVOYAGE_DOCKER_BIN")
-	if dockerBin == "" {
-		fmt.Fprintln(stdout, "ENVOYAGE_DOCKER_BIN: not set")
-		if realDocker, err := compose.FindRealDockerBin(shimPath); err == nil {
-			fmt.Fprintf(stdout, "real docker candidate: %s\n", realDocker)
+	envName := compose.RuntimeBinEnv(runtimeName)
+	runtimeBin := os.Getenv(envName)
+	if runtimeBin == "" {
+		fmt.Fprintf(stdout, "%s: not set\n", envName)
+		if realRuntime, err := compose.FindRealRuntimeBin(runtimeName, shimPath); err == nil {
+			fmt.Fprintf(stdout, "real %s candidate: %s\n", runtimeName, realRuntime)
 		} else {
-			fmt.Fprintf(stdout, "real docker candidate: %v\n", err)
+			fmt.Fprintf(stdout, "real %s candidate: %v\n", runtimeName, err)
 		}
 	} else {
-		fmt.Fprintf(stdout, "ENVOYAGE_DOCKER_BIN: %s\n", dockerBin)
+		fmt.Fprintf(stdout, "%s: %s\n", envName, runtimeBin)
 	}
 }
 
 func dockerShimPathForMode(binDir string, system bool, binDirProvided bool) (string, error) {
+	return runtimeShimPathForMode(shimRuntimeDocker, binDir, system, binDirProvided)
+}
+
+func runtimeShimPathForMode(runtimeName string, binDir string, system bool, binDirProvided bool) (string, error) {
 	if system {
 		if binDirProvided {
 			return "", fmt.Errorf("--system cannot be combined with --bin-dir")
 		}
 		binDir = defaultSystemShimBinDir
 	}
-	return dockerShimPath(binDir)
+	return runtimeShimPath(runtimeName, binDir)
 }
 
 func dockerShimPath(binDir string) (string, error) {
+	return runtimeShimPath(shimRuntimeDocker, binDir)
+}
+
+func runtimeShimPath(runtimeName string, binDir string) (string, error) {
 	dir, err := expandHomePath(binDir)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "docker"), nil
+	return filepath.Join(dir, runtimeName), nil
+}
+
+func shimBinDirForMode(binDir string, system bool) string {
+	if system {
+		return defaultSystemShimBinDir
+	}
+	dir, err := expandHomePath(binDir)
+	if err != nil {
+		return binDir
+	}
+	return dir
+}
+
+func shimInstallRuntimes(runtimeName string, binDir string, system bool, binDirProvided bool) ([]string, error) {
+	switch runtimeName {
+	case shimRuntimeDocker, shimRuntimePodman:
+		return []string{runtimeName}, nil
+	case shimRuntimeAll:
+		return append([]string(nil), supportedShimRuntimes...), nil
+	case shimRuntimeAuto:
+		var detected []string
+		for _, candidate := range supportedShimRuntimes {
+			shimPath, err := runtimeShimPathForMode(candidate, binDir, system, binDirProvided)
+			if err != nil {
+				return nil, err
+			}
+			if shimRuntimeAvailable(candidate, shimPath) {
+				detected = append(detected, candidate)
+			}
+		}
+		if len(detected) == 0 {
+			return nil, fmt.Errorf("no supported runtime found for shim install; install docker or podman, or pass --runtime docker|podman|all")
+		}
+		return detected, nil
+	default:
+		return nil, fmt.Errorf("unsupported shim runtime %q; use auto, docker, podman, or all", runtimeName)
+	}
+}
+
+func shimInspectionRuntimes(runtimeName string) ([]string, error) {
+	switch runtimeName {
+	case shimRuntimeDocker, shimRuntimePodman:
+		return []string{runtimeName}, nil
+	case shimRuntimeAuto, shimRuntimeAll:
+		return append([]string(nil), supportedShimRuntimes...), nil
+	default:
+		return nil, fmt.Errorf("unsupported shim runtime %q; use auto, docker, podman, or all", runtimeName)
+	}
+}
+
+func shimRuntimeAvailable(runtimeName string, shimPath string) bool {
+	if os.Getenv(compose.RuntimeBinEnv(runtimeName)) != "" {
+		return true
+	}
+	_, err := compose.FindRealRuntimeBin(runtimeName, shimPath)
+	return err == nil
 }
 
 func envoyageExecutablePath() (string, error) {
@@ -464,19 +610,22 @@ func expandHomePath(path string) (string, error) {
 	return path, nil
 }
 
-func printShimActivation(stdout io.Writer, binDir string, dockerBin string) {
+func printShimActivation(stdout io.Writer, binDir string, runtimes []string) {
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "To activate shim mode:")
 	fmt.Fprintf(stdout, "  export PATH=%q:$PATH\n", binDir)
-	if dockerBin == "" {
-		fmt.Fprintln(stdout, "  export ENVOYAGE_DOCKER_BIN=/usr/bin/docker")
+	for _, runtimeName := range runtimes {
+		envName := compose.RuntimeBinEnv(runtimeName)
+		if os.Getenv(envName) == "" {
+			fmt.Fprintf(stdout, "  export %s=/usr/bin/%s\n", envName, runtimeName)
+		}
 	}
 	printHashCommand(stdout)
 }
 
 func printShimUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, `Usage:
-  envoyage shim status [--system] [--bin-dir ~/.local/bin]
-  envoyage shim install [--system] [--bin-dir ~/.local/bin] [--force]
-  envoyage shim uninstall [--system|--bin-dir ~/.local/bin]`)
+  envoyage shim status [--runtime auto|docker|podman|all] [--system] [--bin-dir ~/.local/bin]
+  envoyage shim install [--runtime auto|docker|podman|all] [--system] [--bin-dir ~/.local/bin] [--force]
+  envoyage shim uninstall [--runtime auto|docker|podman|all] [--system|--bin-dir ~/.local/bin]`)
 }

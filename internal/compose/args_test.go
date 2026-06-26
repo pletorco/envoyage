@@ -695,6 +695,89 @@ func TestFindRealDockerBinReportsMissingRealDocker(t *testing.T) {
 	}
 }
 
+func TestFindRealRuntimeBinSupportsPodman(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit checks are different on Windows")
+	}
+
+	dir := t.TempDir()
+	realPath := filepath.Join(dir, "podman")
+	if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(podman) error = %v", err)
+	}
+
+	t.Setenv("PATH", dir)
+
+	got, err := FindRealRuntimeBin("podman", filepath.Join(dir, "shim", "podman"))
+	if err != nil {
+		t.Fatalf("FindRealRuntimeBin(podman) error = %v", err)
+	}
+	if got != realPath {
+		t.Fatalf("FindRealRuntimeBin(podman) = %q, want %q", got, realPath)
+	}
+}
+
+func TestFindRealRuntimeBinReportsMissingPodman(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit checks are different on Windows")
+	}
+
+	dir := t.TempDir()
+	shimPath := filepath.Join(dir, "podman")
+	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\nexit 99\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(shim) error = %v", err)
+	}
+
+	t.Setenv("PATH", dir)
+
+	_, err := FindRealRuntimeBin("podman", shimPath)
+	if err == nil {
+		t.Fatal("FindRealRuntimeBin(podman) error = nil, want missing real podman error")
+	}
+	if !strings.Contains(err.Error(), "ENVOYAGE_PODMAN_BIN") {
+		t.Fatalf("error = %q, want ENVOYAGE_PODMAN_BIN guidance", err.Error())
+	}
+}
+
+func TestNewShimRunnerDiscoversRealPodman(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit checks are different on Windows")
+	}
+
+	dir := t.TempDir()
+	shimDir := filepath.Join(dir, "shim")
+	realDir := filepath.Join(dir, "real")
+	if err := os.MkdirAll(shimDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(shim) error = %v", err)
+	}
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(real) error = %v", err)
+	}
+
+	shimPath := filepath.Join(shimDir, "podman")
+	realPath := filepath.Join(realDir, "podman")
+	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\nexit 99\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(shim) error = %v", err)
+	}
+	if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(real) error = %v", err)
+	}
+
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+realDir)
+	t.Setenv("ENVOYAGE_PODMAN_BIN", "")
+
+	runner, err := NewShimRunnerForRuntime("podman", shimPath)
+	if err != nil {
+		t.Fatalf("NewShimRunnerForRuntime(podman) error = %v", err)
+	}
+	if runner.DockerBin != realPath {
+		t.Fatalf("DockerBin = %q, want real podman %q", runner.DockerBin, realPath)
+	}
+	if runner.Runtime != "podman" {
+		t.Fatalf("Runtime = %q, want podman", runner.Runtime)
+	}
+}
+
 func TestRunComposeReturnsParseAndLoadErrors(t *testing.T) {
 	err := RunCompose(context.Background(), []string{"--env-file"})
 	if err == nil {
@@ -734,6 +817,57 @@ func TestNewShimRunnerUsesDockerBinEnv(t *testing.T) {
 	}
 	if runner.DockerBin != "/custom/docker" {
 		t.Fatalf("DockerBin = %q, want env docker bin", runner.DockerBin)
+	}
+}
+
+func TestNewShimRunnerUsesPodmanBinEnv(t *testing.T) {
+	t.Setenv("ENVOYAGE_PODMAN_BIN", "/custom/podman")
+
+	runner, err := NewShimRunnerForRuntime("podman", "/ignored/podman")
+	if err != nil {
+		t.Fatalf("NewShimRunnerForRuntime(podman) error = %v", err)
+	}
+	if runner.DockerBin != "/custom/podman" {
+		t.Fatalf("DockerBin = %q, want env podman bin", runner.DockerBin)
+	}
+	if runner.Runtime != "podman" {
+		t.Fatalf("Runtime = %q, want podman", runner.Runtime)
+	}
+}
+
+func TestRuntimeBinEnvMapsSupportedRuntimes(t *testing.T) {
+	tests := map[string]string{
+		"docker": "ENVOYAGE_DOCKER_BIN",
+		"podman": "ENVOYAGE_PODMAN_BIN",
+		"":       "ENVOYAGE_DOCKER_BIN",
+		"other":  "ENVOYAGE_DOCKER_BIN",
+	}
+	for runtimeName, want := range tests {
+		t.Run(runtimeName, func(t *testing.T) {
+			if got := RuntimeBinEnv(runtimeName); got != want {
+				t.Fatalf("RuntimeBinEnv(%q) = %q, want %q", runtimeName, got, want)
+			}
+		})
+	}
+}
+
+func TestRunnerUsesPodmanErrorPrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is POSIX-specific")
+	}
+
+	dir := t.TempDir()
+	podmanPath := filepath.Join(dir, "podman")
+	if err := os.WriteFile(podmanPath, []byte("#!/bin/sh\nexit 7\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(podman) error = %v", err)
+	}
+
+	err := Runner{DockerBin: podmanPath, Runtime: "podman"}.Run(context.Background(), []string{"config"}, nil)
+	if err == nil {
+		t.Fatal("Run() error = nil, want command error")
+	}
+	if !strings.Contains(err.Error(), "run podman compose") {
+		t.Fatalf("error = %q, want run podman compose", err.Error())
 	}
 }
 

@@ -134,9 +134,11 @@ func uninstallDefaultInstallPaths(stdout io.Writer) error {
 }
 
 func uninstallInstallPaths(paths installPaths, stdout io.Writer) error {
-	shimPath := filepath.Join(paths.BinDir, "docker")
-	if err := uninstallShimPathIfManaged(shimPath, shimManagedTargets(paths.Target), stdout); err != nil {
-		return err
+	for _, runtimeName := range supportedShimRuntimes {
+		shimPath := filepath.Join(paths.BinDir, runtimeName)
+		if err := uninstallShimPathIfManaged(shimPath, shimManagedTargets(paths.Target), stdout); err != nil {
+			return err
+		}
 	}
 	if err := uninstallEnvoyageSymlink(paths.Link, paths.Target, stdout); err != nil {
 		return err
