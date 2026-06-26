@@ -64,6 +64,8 @@ func runEnvoyage(args []string) error {
 	switch args[0] {
 	case "compose":
 		return compose.RunCompose(context.Background(), args[1:])
+	case "completion":
+		return runCompletion(args[1:], os.Stdout)
 	case "install":
 		return runInstall(args[1:], os.Stdout)
 	case "encrypt":
@@ -111,6 +113,16 @@ func runVersion(args []string, stdout io.Writer) error {
 
 func printVersion(stdout io.Writer) {
 	fmt.Fprintf(stdout, "envoyage %s\n", version)
+}
+
+func flagProvided(flags *flag.FlagSet, name string) bool {
+	provided := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			provided = true
+		}
+	})
+	return provided
 }
 
 func runEncrypt(args []string, stdout io.Writer) error {
@@ -315,13 +327,14 @@ func printUsage() {
 
 Usage:
   envoyage compose [--identity PATH] [--env-file FILE...] [docker compose args...]
-  envoyage install [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage] [--force]
-  envoyage uninstall [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage]
-  envoyage status [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage]
+  envoyage install [--system] [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage] [--force]
+  envoyage uninstall [--system|--bin-dir ~/.local/bin --lib-dir ~/.local/lib/envoyage]
+  envoyage status [--system] [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage]
   envoyage keygen [--out age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] [--identity age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] --recipient age1...
   envoyage decrypt [--in .env.age] [--out .secrets.env] [--identity age-key.txt]
+  envoyage completion bash|zsh|fish|powershell
   envoyage shim status|install|uninstall
   envoyage version
 
@@ -337,8 +350,11 @@ Examples:
   envoyage compose up -d
   envoyage compose --identity ./age-key.txt config
   envoyage compose --env-file custom.env --env-file custom.env.age config
+  envoyage completion bash > ~/.local/share/bash-completion/completions/envoyage
   envoyage shim status
   envoyage shim install --bin-dir ~/.local/bin
+  sudo envoyage install --system
+  sudo envoyage shim install --system
 
 Environment:
   AGE_IDENTITY_FILE      age identity file path when --identity is omitted

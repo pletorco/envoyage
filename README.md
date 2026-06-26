@@ -92,6 +92,74 @@ binary and recreate the Envoyage-managed symlink:
 envoyage install --force
 envoyage status
 envoyage uninstall
+hash -r
+```
+
+By default, `envoyage uninstall` checks both the user-local install path and the
+system-wide install path, then removes only Envoyage-managed symlinks and
+binaries. Use `--system`, `--bin-dir`, or `--lib-dir` only when you want to
+target one location explicitly. The user-local path is resolved from the current
+process user, so `sudo envoyage uninstall` checks root's home plus the
+system-wide path. Envoyage-managed `docker` shim symlinks are removed before the
+Envoyage binary for the same scope is removed.
+
+For a system-wide install under `/usr/local`, run with elevated privileges:
+
+```bash
+sudo ./envoyage install --system
+hash -r
+envoyage status --system
+sudo envoyage uninstall
+hash -r
+```
+
+System-wide install copies the binary to `/usr/local/lib/envoyage/envoyage` and
+creates `/usr/local/bin/envoyage` as a symlink. It follows the same overwrite
+rules as the user-local install: existing non-Envoyage commands are not replaced,
+and an existing Envoyage install is only replaced with `--force`.
+
+If your current shell still tries an older path such as
+`~/.local/bin/envoyage`, refresh the shell command cache with `hash -r` or open a
+new shell.
+
+## Shell Completion
+
+Envoyage can generate shell completion scripts:
+
+```bash
+envoyage completion bash
+envoyage completion zsh
+envoyage completion fish
+envoyage completion powershell
+```
+
+For bash:
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+envoyage completion bash > ~/.local/share/bash-completion/completions/envoyage
+```
+
+For zsh:
+
+```bash
+mkdir -p ~/.zfunc
+envoyage completion zsh > ~/.zfunc/_envoyage
+echo 'fpath=(~/.zfunc $fpath)' >> ~/.zshrc
+echo 'autoload -Uz compinit && compinit' >> ~/.zshrc
+```
+
+For fish:
+
+```bash
+mkdir -p ~/.config/fish/completions
+envoyage completion fish > ~/.config/fish/completions/envoyage.fish
+```
+
+For PowerShell:
+
+```powershell
+envoyage completion powershell >> $PROFILE
 ```
 
 ## Quickstart
@@ -409,6 +477,13 @@ Create a user-local shim:
 envoyage shim install
 ```
 
+`envoyage shim install` first ensures Envoyage itself is installed to a stable
+location, then creates the `docker` shim symlink to that installed binary. For
+the default user-local mode, the shim points to
+`~/.local/lib/envoyage/envoyage`. With `--system`, it points to
+`/usr/local/lib/envoyage/envoyage`. Use `--force` when you intentionally want to
+refresh both the installed Envoyage binary and the shim symlink.
+
 Put `~/.local/bin` before the real Docker directory in `PATH`, and point
 Envoyage at the real Docker binary:
 
@@ -437,7 +512,29 @@ Remove the shim when you no longer want Docker-shaped interception:
 
 ```bash
 envoyage shim uninstall
+hash -r
 ```
+
+By default, `envoyage shim uninstall` checks both the user-local shim path and
+the system-wide shim path, then removes only Envoyage-managed shim symlinks. Use
+`--system` or `--bin-dir` only when you want to target one location explicitly.
+The user-local path is resolved from the current process user, so
+`sudo envoyage shim uninstall` checks root's home plus the system-wide path.
+
+For a system-wide shim under `/usr/local/bin`, run:
+
+```bash
+sudo envoyage shim install --system
+hash -r
+envoyage shim status --system
+sudo envoyage shim uninstall
+hash -r
+```
+
+System-wide shim mode first installs Envoyage under `/usr/local/lib/envoyage`,
+then creates `/usr/local/bin/docker` as a symlink to that installed binary. It
+still refuses to overwrite an existing non-Envoyage `docker` file, even with
+`--force`.
 
 `envoyage shim install` refuses to overwrite an existing non-Envoyage `docker`
 file, even with `--force`. `--force` only recreates a shim symlink that already
