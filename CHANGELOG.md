@@ -2,6 +2,17 @@
 
 All notable changes to Envoyage are documented in this file.
 
+## 0.2.1
+
+### Added
+
+- Added `envoyage install`, `envoyage status`, and `envoyage uninstall` for
+  user-local Envoyage binary installation.
+
+### Changed
+
+- Bumped the development version to `0.2.1`.
+
 ## 0.2.0
 
 ### Added

@@ -72,7 +72,27 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The current Envoyage version is `0.2.0`.
+The current Envoyage version is `0.2.1`.
+
+Install the current binary into a user-local location:
+
+```bash
+./envoyage install
+export PATH="$HOME/.local/bin:$PATH"
+envoyage version
+```
+
+By default, `envoyage install` copies the current binary to
+`~/.local/lib/envoyage/envoyage` and creates `~/.local/bin/envoyage` as a
+symlink. It refuses to overwrite an existing non-Envoyage command symlink. Use
+`--force` only when you intentionally want to replace the installed Envoyage
+binary and recreate the Envoyage-managed symlink:
+
+```bash
+envoyage install --force
+envoyage status
+envoyage uninstall
+```
 
 ## Quickstart
 
@@ -84,6 +104,8 @@ Build Envoyage from the repository root:
 
 ```bash
 go build -o envoyage ./cmd/envoyage
+./envoyage install
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Move into the example:
@@ -95,25 +117,25 @@ cd examples/postgresql
 Generate a local age identity for the example:
 
 ```bash
-../../envoyage keygen --out age-key.txt
+envoyage keygen --out age-key.txt
 ```
 
 Encrypt `.secrets.env` to `.env.age`:
 
 ```bash
-AGE_IDENTITY_FILE=./age-key.txt ../../envoyage encrypt
+AGE_IDENTITY_FILE=./age-key.txt envoyage encrypt
 ```
 
 Preview the Compose configuration:
 
 ```bash
-AGE_IDENTITY_FILE=./age-key.txt ../../envoyage compose -f compose.yaml config
+AGE_IDENTITY_FILE=./age-key.txt envoyage compose -f compose.yaml config
 ```
 
 Start the services:
 
 ```bash
-AGE_IDENTITY_FILE=./age-key.txt ../../envoyage compose -f compose.yaml up -d
+AGE_IDENTITY_FILE=./age-key.txt envoyage compose -f compose.yaml up -d
 ```
 
 Open pgAdmin:
@@ -139,9 +161,9 @@ policy.
 Optional Docker-shaped flow:
 
 ```bash
-../../envoyage shim install --bin-dir ./bin
+envoyage shim install --bin-dir ./bin
 PATH="$PWD/bin:$PATH" ENVOYAGE_DOCKER_BIN=/usr/bin/docker docker compose -f compose.yaml config
-../../envoyage shim uninstall --bin-dir ./bin
+envoyage shim uninstall --bin-dir ./bin
 ```
 
 ## Create `.env.age`
@@ -527,8 +549,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -536,8 +558,8 @@ and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
 files to GitHub Releases.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.2.0` produces:
+`envoyage version`. For example, `v0.2.1` produces:
 
 ```text
-envoyage 0.2.0
+envoyage 0.2.1
 ```
