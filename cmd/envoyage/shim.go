@@ -79,6 +79,9 @@ func runShimInstall(args []string, stdout io.Writer) error {
 	}
 
 	binDirProvided := flagProvided(flags, shimBinDirFlag)
+	if err := validateShimPathMode(system, binDirProvided); err != nil {
+		return err
+	}
 	runtimes, err := shimInstallRuntimes(runtimeName, binDir, system, binDirProvided)
 	if err != nil {
 		return err
@@ -234,6 +237,9 @@ func runShimUninstall(args []string, stdout io.Writer) error {
 	}
 
 	binDirProvided := flagProvided(flags, shimBinDirFlag)
+	if err := validateShimPathMode(system, binDirProvided); err != nil {
+		return err
+	}
 	runtimes, err := shimInspectionRuntimes(runtimeName)
 	if err != nil {
 		return err
@@ -429,13 +435,20 @@ func dockerShimPathForMode(binDir string, system bool, binDirProvided bool) (str
 }
 
 func runtimeShimPathForMode(runtimeName string, binDir string, system bool, binDirProvided bool) (string, error) {
+	if err := validateShimPathMode(system, binDirProvided); err != nil {
+		return "", err
+	}
 	if system {
-		if binDirProvided {
-			return "", fmt.Errorf("--system cannot be combined with --bin-dir")
-		}
 		binDir = defaultSystemShimBinDir
 	}
 	return runtimeShimPath(runtimeName, binDir)
+}
+
+func validateShimPathMode(system bool, binDirProvided bool) error {
+	if system && binDirProvided {
+		return fmt.Errorf("--system cannot be combined with --bin-dir")
+	}
+	return nil
 }
 
 func dockerShimPath(binDir string) (string, error) {
