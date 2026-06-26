@@ -8,10 +8,21 @@ All notable changes to Envoyage are documented in this file.
 
 - Added `envoyage install`, `envoyage status`, and `envoyage uninstall` for
   user-local Envoyage binary installation.
+- Added `envoyage completion bash|zsh|fish|powershell` for shell completion
+  script generation.
+- Added system-wide install mode with `envoyage install --system` and
+  `envoyage shim install --system`.
 
 ### Changed
 
 - Bumped the development version to `0.2.1`.
+- Changed `envoyage uninstall` and `envoyage shim uninstall` to automatically
+  check both default user-local and system-wide locations when no explicit
+  location flag is passed.
+- Changed `envoyage uninstall` to remove Envoyage-managed `docker` shims before
+  removing Envoyage binaries.
+- Changed `envoyage shim install` to install Envoyage first and point the
+  `docker` shim at the stable installed binary.
 
 ### Security
 

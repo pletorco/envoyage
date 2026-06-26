@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	defaultInstallBinDir = "~/.local/bin"
-	defaultInstallLibDir = "~/.local/lib/envoyage"
+	defaultInstallBinDir       = "~/.local/bin"
+	defaultInstallLibDir       = "~/.local/lib/envoyage"
+	defaultSystemInstallBinDir = "/usr/local/bin"
+	defaultSystemInstallLibDir = "/usr/local/lib/envoyage"
 )
 
 const (
@@ -20,6 +22,7 @@ const (
 	installBinDirUsage = "directory where the envoyage command symlink is installed"
 	installLibDirFlag  = "lib-dir"
 	installLibDirUsage = "directory where the envoyage binary is installed"
+	installSystemUsage = "install to system-wide paths under /usr/local"
 )
 
 type installPaths struct {
@@ -33,11 +36,13 @@ func runInstall(args []string, stdout io.Writer) error {
 	var binDir string
 	var libDir string
 	var force bool
+	var system bool
 
 	flags := flag.NewFlagSet("install", flag.ContinueOnError)
 	flags.StringVar(&binDir, installBinDirFlag, defaultInstallBinDir, installBinDirUsage)
 	flags.StringVar(&libDir, installLibDirFlag, defaultInstallLibDir, installLibDirUsage)
 	flags.BoolVar(&force, "force", false, "overwrite the installed Envoyage binary and recreate the Envoyage symlink")
+	flags.BoolVar(&system, "system", false, installSystemUsage)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -45,7 +50,7 @@ func runInstall(args []string, stdout io.Writer) error {
 		return fmt.Errorf("install does not accept arguments")
 	}
 
-	paths, err := resolveInstallPaths(binDir, libDir)
+	paths, err := resolveInstallPathsForMode(binDir, libDir, system, flagProvided(flags, installBinDirFlag), flagProvided(flags, installLibDirFlag))
 	if err != nil {
 		return err
 	}
@@ -76,10 +81,12 @@ func runInstall(args []string, stdout io.Writer) error {
 func runUninstall(args []string, stdout io.Writer) error {
 	var binDir string
 	var libDir string
+	var system bool
 
 	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	flags.StringVar(&binDir, installBinDirFlag, defaultInstallBinDir, installBinDirUsage)
 	flags.StringVar(&libDir, installLibDirFlag, defaultInstallLibDir, installLibDirUsage)
+	flags.BoolVar(&system, "system", false, installSystemUsage)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -87,8 +94,48 @@ func runUninstall(args []string, stdout io.Writer) error {
 		return fmt.Errorf("uninstall does not accept arguments")
 	}
 
-	paths, err := resolveInstallPaths(binDir, libDir)
+	binDirProvided := flagProvided(flags, installBinDirFlag)
+	libDirProvided := flagProvided(flags, installLibDirFlag)
+	if !system && !binDirProvided && !libDirProvided {
+		if err := uninstallDefaultInstallPaths(stdout); err != nil {
+			return err
+		}
+		printShellHashRefresh(stdout)
+		return nil
+	}
+
+	paths, err := resolveInstallPathsForMode(binDir, libDir, system, binDirProvided, libDirProvided)
 	if err != nil {
+		return err
+	}
+	if err := uninstallInstallPaths(paths, stdout); err != nil {
+		return err
+	}
+	printShellHashRefresh(stdout)
+	return nil
+}
+
+func uninstallDefaultInstallPaths(stdout io.Writer) error {
+	userPaths, err := resolveInstallPaths(defaultInstallBinDir, defaultInstallLibDir)
+	if err != nil {
+		return err
+	}
+	systemPaths, err := resolveInstallPaths(defaultSystemInstallBinDir, defaultSystemInstallLibDir)
+	if err != nil {
+		return err
+	}
+
+	for _, paths := range []installPaths{userPaths, systemPaths} {
+		if err := uninstallInstallPaths(paths, stdout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func uninstallInstallPaths(paths installPaths, stdout io.Writer) error {
+	shimPath := filepath.Join(paths.BinDir, "docker")
+	if err := uninstallShimPathIfManaged(shimPath, shimManagedTargets(paths.Target), stdout); err != nil {
 		return err
 	}
 	if err := uninstallEnvoyageSymlink(paths.Link, paths.Target, stdout); err != nil {
@@ -103,10 +150,12 @@ func runUninstall(args []string, stdout io.Writer) error {
 func runStatus(args []string, stdout io.Writer) error {
 	var binDir string
 	var libDir string
+	var system bool
 
 	flags := flag.NewFlagSet("status", flag.ContinueOnError)
 	flags.StringVar(&binDir, installBinDirFlag, defaultInstallBinDir, installBinDirUsage)
 	flags.StringVar(&libDir, installLibDirFlag, defaultInstallLibDir, installLibDirUsage)
+	flags.BoolVar(&system, "system", false, installSystemUsage)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -114,7 +163,7 @@ func runStatus(args []string, stdout io.Writer) error {
 		return fmt.Errorf("status does not accept arguments")
 	}
 
-	paths, err := resolveInstallPaths(binDir, libDir)
+	paths, err := resolveInstallPathsForMode(binDir, libDir, system, flagProvided(flags, installBinDirFlag), flagProvided(flags, installLibDirFlag))
 	if err != nil {
 		return err
 	}
@@ -134,6 +183,17 @@ func runStatus(args []string, stdout io.Writer) error {
 	}
 	printInstallActivation(stdout, paths.BinDir)
 	return nil
+}
+
+func resolveInstallPathsForMode(binDir string, libDir string, system bool, binDirProvided bool, libDirProvided bool) (installPaths, error) {
+	if system {
+		if binDirProvided || libDirProvided {
+			return installPaths{}, fmt.Errorf("--system cannot be combined with --bin-dir or --lib-dir")
+		}
+		binDir = defaultSystemInstallBinDir
+		libDir = defaultSystemInstallLibDir
+	}
+	return resolveInstallPaths(binDir, libDir)
 }
 
 func resolveInstallPaths(binDir string, libDir string) (installPaths, error) {
@@ -318,4 +378,15 @@ func printInstallActivation(stdout io.Writer, binDir string) {
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "To activate envoyage:")
 	fmt.Fprintf(stdout, "  export PATH=%q:$PATH\n", binDir)
+	printHashCommand(stdout)
+}
+
+func printShellHashRefresh(stdout io.Writer) {
+	fmt.Fprintln(stdout, "")
+	fmt.Fprintln(stdout, "To refresh your current shell:")
+	printHashCommand(stdout)
+}
+
+func printHashCommand(stdout io.Writer) {
+	fmt.Fprintln(stdout, "  hash -r")
 }
