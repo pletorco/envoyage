@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	version                  = "0.2.0"
+	version                  = "0.2.1"
 	defaultKeygenOutputPath  = compose.DefaultIdentityFile
 	defaultEncryptInputPath  = ".secrets.env"
 	defaultEncryptOutputPath = ".env.age"
@@ -64,6 +64,8 @@ func runEnvoyage(args []string) error {
 	switch args[0] {
 	case "compose":
 		return compose.RunCompose(context.Background(), args[1:])
+	case "install":
+		return runInstall(args[1:], os.Stdout)
 	case "encrypt":
 		return runEncrypt(args[1:], os.Stdout)
 	case "decrypt":
@@ -72,6 +74,10 @@ func runEnvoyage(args []string) error {
 		return runKeygen(args[1:], os.Stdout)
 	case "shim":
 		return runShim(args[1:], os.Stdout)
+	case "status":
+		return runStatus(args[1:], os.Stdout)
+	case "uninstall":
+		return runUninstall(args[1:], os.Stdout)
 	case "version":
 		return runVersion(args[1:], os.Stdout)
 	default:
@@ -309,6 +315,9 @@ func printUsage() {
 
 Usage:
   envoyage compose [--identity PATH] [--env-file FILE...] [docker compose args...]
+  envoyage install [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage] [--force]
+  envoyage uninstall [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage]
+  envoyage status [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage]
   envoyage keygen [--out age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] [--identity age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] --recipient age1...
@@ -318,6 +327,8 @@ Usage:
 
 Examples:
   envoyage version
+  envoyage install
+  envoyage status
   envoyage keygen
   envoyage keygen --out age-key.txt
   envoyage encrypt

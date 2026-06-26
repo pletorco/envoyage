@@ -581,6 +581,311 @@ func TestDockerShimNameIncludesWindowsExecutable(t *testing.T) {
 	}
 }
 
+func TestInstallStatusAndUninstall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-envoyage")
+	binDir := filepath.Join(dir, "bin")
+	libDir := filepath.Join(dir, "lib", "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.WriteFile(source, []byte("envoyage-binary\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+
+	var installOut bytes.Buffer
+	if err := runInstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &installOut); err != nil {
+		t.Fatalf("runInstall() error = %v", err)
+	}
+	target := filepath.Join(libDir, "envoyage")
+	link := filepath.Join(binDir, "envoyage")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile(target) error = %v", err)
+	}
+	if string(data) != "envoyage-binary\n" {
+		t.Fatalf("installed binary = %q, want source content", data)
+	}
+	linkTarget, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("Readlink(link) error = %v", err)
+	}
+	if linkTarget != target {
+		t.Fatalf("link target = %q, want %q", linkTarget, target)
+	}
+	if !strings.Contains(installOut.String(), "installed envoyage") {
+		t.Fatalf("install output = %q, want installed envoyage", installOut.String())
+	}
+
+	var statusOut bytes.Buffer
+	if err := runStatus([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &statusOut); err != nil {
+		t.Fatalf("runStatus() error = %v", err)
+	}
+	if !strings.Contains(statusOut.String(), "installed binary: yes") {
+		t.Fatalf("status output = %q, want installed binary yes", statusOut.String())
+	}
+	if !strings.Contains(statusOut.String(), "command symlink installed: yes") {
+		t.Fatalf("status output = %q, want command symlink yes", statusOut.String())
+	}
+
+	var uninstallOut bytes.Buffer
+	if err := runUninstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &uninstallOut); err != nil {
+		t.Fatalf("runUninstall() error = %v", err)
+	}
+	if !strings.Contains(uninstallOut.String(), "removed command symlink") {
+		t.Fatalf("uninstall output = %q, want removed command symlink", uninstallOut.String())
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("command symlink still exists after uninstall: %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("installed binary still exists after uninstall: %v", err)
+	}
+}
+
+func TestInstallUsesDefaultHomeDirectories(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+	userHomeDir = func() (string, error) { return dir, nil }
+
+	if err := os.WriteFile(source, []byte("envoyage-binary\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := runInstall(nil, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runInstall(defaults) error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".local", "lib", "envoyage", "envoyage")); err != nil {
+		t.Fatalf("default install target missing: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".local", "bin", "envoyage")); err != nil {
+		t.Fatalf("default command symlink missing: %v", err)
+	}
+}
+
+func TestInstallForceReplacesInstalledBinaryAndSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior requires platform-specific privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-envoyage")
+	binDir := filepath.Join(dir, "bin")
+	libDir := filepath.Join(dir, "lib")
+	target := filepath.Join(libDir, "envoyage")
+	link := filepath.Join(binDir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.MkdirAll(libDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(lib) error = %v", err)
+	}
+	if err := os.WriteFile(source, []byte("new-binary\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := os.WriteFile(target, []byte("old-binary\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink(link) error = %v", err)
+	}
+
+	if err := runInstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &bytes.Buffer{}); err == nil {
+		t.Fatal("runInstall(existing target) error = nil, want overwrite guidance")
+	}
+	if err := runInstall([]string{"--bin-dir", binDir, "--lib-dir", libDir, "--force"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runInstall(force) error = %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile(target) error = %v", err)
+	}
+	if string(data) != "new-binary\n" {
+		t.Fatalf("target after force = %q, want new binary", data)
+	}
+
+	osExecutable = func() (string, error) { return target, nil }
+	var out bytes.Buffer
+	if err := runInstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &out); err != nil {
+		t.Fatalf("runInstall(already installed) error = %v", err)
+	}
+	if !strings.Contains(out.String(), "command symlink already installed") {
+		t.Fatalf("install output = %q, want already installed symlink", out.String())
+	}
+}
+
+func TestInstallRefusesNonEnvoyageCommand(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-envoyage")
+	binDir := filepath.Join(dir, "bin")
+	libDir := filepath.Join(dir, "lib")
+	link := filepath.Join(binDir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.WriteFile(source, []byte("envoyage-binary\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := os.WriteFile(link, []byte("other-command\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(link) error = %v", err)
+	}
+
+	err := runInstall([]string{"--bin-dir", binDir, "--lib-dir", libDir, "--force"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runInstall(non-envoyage command) error = nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite non-Envoyage command") {
+		t.Fatalf("install error = %q, want overwrite refusal", err.Error())
+	}
+}
+
+func TestUninstallRefusesNonEnvoyageCommand(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	libDir := filepath.Join(dir, "lib")
+	link := filepath.Join(binDir, "envoyage")
+
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.WriteFile(link, []byte("other-command\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(link) error = %v", err)
+	}
+
+	err := runUninstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runUninstall(non-envoyage command) error = nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to remove non-Envoyage command") {
+		t.Fatalf("uninstall error = %q, want remove refusal", err.Error())
+	}
+}
+
+func TestUninstallMissingIsNoop(t *testing.T) {
+	dir := t.TempDir()
+
+	var out bytes.Buffer
+	if err := runUninstall([]string{"--bin-dir", filepath.Join(dir, "bin"), "--lib-dir", filepath.Join(dir, "lib")}, &out); err != nil {
+		t.Fatalf("runUninstall(missing) error = %v", err)
+	}
+	if !strings.Contains(out.String(), "command symlink not installed") {
+		t.Fatalf("uninstall output = %q, want symlink missing", out.String())
+	}
+	if !strings.Contains(out.String(), "installed binary not found") {
+		t.Fatalf("uninstall output = %q, want binary missing", out.String())
+	}
+}
+
+func TestInstallRejectsDirectoryTargets(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-envoyage")
+	binDir := filepath.Join(dir, "bin")
+	libDir := filepath.Join(dir, "lib")
+	target := filepath.Join(libDir, "envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return source, nil }
+
+	if err := os.WriteFile(source, []byte("envoyage-binary\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+
+	err := runInstall([]string{"--bin-dir", binDir, "--lib-dir", libDir, "--force"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runInstall(directory target) error = nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite directory") {
+		t.Fatalf("install error = %q, want directory refusal", err.Error())
+	}
+
+	err = runUninstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runUninstall(directory target) error = nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to remove directory") {
+		t.Fatalf("uninstall error = %q, want directory refusal", err.Error())
+	}
+}
+
+func TestInstallReportsSourceExecutableErrors(t *testing.T) {
+	dir := t.TempDir()
+	missingSource := filepath.Join(dir, "missing-envoyage")
+	restoreShimHooks(t)
+	osExecutable = func() (string, error) { return missingSource, nil }
+
+	err := runInstall([]string{"--bin-dir", filepath.Join(dir, "bin"), "--lib-dir", filepath.Join(dir, "lib")}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runInstall(missing source) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "open source executable") {
+		t.Fatalf("install error = %q, want source executable error", err.Error())
+	}
+}
+
+func TestInstallStatusDispatchAndValidation(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := run([]string{"status", "--bin-dir", filepath.Join(t.TempDir(), "bin"), "--lib-dir", filepath.Join(t.TempDir(), "lib")}); err != nil {
+			t.Fatalf("run(status) error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "install target:") {
+		t.Fatalf("status output = %q, want install target", output)
+	}
+
+	tests := [][]string{
+		{"install", "extra"},
+		{"uninstall", "extra"},
+		{"status", "extra"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := run(args)
+			if err == nil {
+				t.Fatal("run() error = nil, want extra args error")
+			}
+			if !strings.Contains(err.Error(), "does not accept arguments") {
+				t.Fatalf("error = %q, want extra args error", err.Error())
+			}
+		})
+	}
+}
+
+func TestInstallRejectsEmptyDirectories(t *testing.T) {
+	err := runInstall([]string{"--bin-dir", ""}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runInstall(empty bin dir) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "--bin-dir is required") {
+		t.Fatalf("install error = %q, want bin-dir guidance", err.Error())
+	}
+
+	err = runStatus([]string{"--lib-dir", ""}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runStatus(empty lib dir) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "--lib-dir is required") {
+		t.Fatalf("status error = %q, want directory guidance", err.Error())
+	}
+}
+
 func TestShimInstallStatusAndUninstall(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink behavior requires platform-specific privileges on Windows")
@@ -877,8 +1182,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.2.0\n" {
-				t.Fatalf("version output = %q, want envoyage 0.2.0", output)
+			if output != "envoyage 0.2.1\n" {
+				t.Fatalf("version output = %q, want envoyage 0.2.1", output)
 			}
 		})
 	}
