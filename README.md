@@ -72,7 +72,7 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The current Envoyage version is `0.2.1`.
+The current Envoyage version is `0.3.0`.
 
 Install the current binary into a user-local location:
 
@@ -232,6 +232,76 @@ Optional Docker-shaped flow:
 envoyage shim install --bin-dir ./bin
 PATH="$PWD/bin:$PATH" ENVOYAGE_DOCKER_BIN=/usr/bin/docker docker compose -f compose.yaml config
 envoyage shim uninstall --bin-dir ./bin
+```
+
+## Extract And Inline
+
+Envoyage can help migrate Compose files that keep fixed values directly under
+`services.*.environment`.
+
+Preview an extraction:
+
+```bash
+envoyage env extract
+```
+
+This scans `compose.yaml`, `compose.yml`, `docker-compose.yaml`, or
+`docker-compose.yml` when exactly one exists. Pass `--compose` when you want a
+specific file:
+
+```bash
+envoyage env extract --compose compose.yaml
+```
+
+The preview prints key names only. Values are not printed:
+
+```text
+extract: compose.yaml
+
+.env:
+  DB_HOST
+  DB_USER
+
+.secrets.env:
+  DB_PASSWORD
+  API_TOKEN
+
+compose updates:
+  services.app.environment.DB_HOST
+  services.app.environment.DB_PASSWORD
+
+dry-run: pass --write to update files
+```
+
+Write `.env`, `.secrets.env`, and update the Compose file:
+
+```bash
+envoyage env extract --write
+```
+
+Secret-looking keys such as `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`,
+`PRIVATE_KEY`, `ACCESS_KEY`, and `CREDENTIAL` are written to `.secrets.env`.
+Other extracted keys are written to `.env`. Existing keys are reused when their
+values match; conflicts stop the command without printing the conflicting
+values. Disable secret splitting when you want every extracted key in `.env`:
+
+```bash
+envoyage env extract --secrets=false --write
+```
+
+The inverse operation is `inline`. It writes a separate Compose file with
+`${VAR}` values replaced from `.env`, `.secrets.env`, and `.env.age`:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt envoyage env inline --out compose.inline.yaml
+```
+
+`inline` never modifies the source Compose file and requires `--out`. The output
+file may contain plaintext secrets, so treat it as sensitive and do not commit
+it. Existing output files are not overwritten unless `--force` is passed:
+
+```bash
+AGE_IDENTITY_FILE=./age-key.txt envoyage env inline --out compose.inline.yaml --force
 ```
 
 ## Create `.env.age`
@@ -646,8 +716,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -655,8 +725,8 @@ and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
 files to GitHub Releases.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.2.1` produces:
+`envoyage version`. For example, `v0.3.0` produces:
 
 ```text
-envoyage 0.2.1
+envoyage 0.3.0
 ```

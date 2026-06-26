@@ -2,6 +2,17 @@
 
 All notable changes to Envoyage are documented in this file.
 
+## 0.3.0
+
+### Added
+
+- Added `envoyage env extract` and `envoyage env inline` for migrating Compose
+  fixed environment values to and from dotenv files.
+
+### Changed
+
+- Bumped the development version to `0.3.0`.
+
 ## 0.2.1
 
 ### Added

@@ -604,51 +604,24 @@ func TestInstallStatusAndUninstall(t *testing.T) {
 	}
 	target := filepath.Join(libDir, "envoyage")
 	link := filepath.Join(binDir, "envoyage")
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("ReadFile(target) error = %v", err)
-	}
-	if string(data) != "envoyage-binary\n" {
-		t.Fatalf("installed binary = %q, want source content", data)
-	}
-	linkTarget, err := os.Readlink(link)
-	if err != nil {
-		t.Fatalf("Readlink(link) error = %v", err)
-	}
-	if linkTarget != target {
-		t.Fatalf("link target = %q, want %q", linkTarget, target)
-	}
-	if !strings.Contains(installOut.String(), "installed envoyage") {
-		t.Fatalf("install output = %q, want installed envoyage", installOut.String())
-	}
+	assertFileContent(t, target, "envoyage-binary\n")
+	assertSymlinkTarget(t, link, target)
+	assertContains(t, installOut.String(), "installed envoyage")
 
 	var statusOut bytes.Buffer
 	if err := runStatus([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &statusOut); err != nil {
 		t.Fatalf("runStatus() error = %v", err)
 	}
-	if !strings.Contains(statusOut.String(), "installed binary: yes") {
-		t.Fatalf("status output = %q, want installed binary yes", statusOut.String())
-	}
-	if !strings.Contains(statusOut.String(), "command symlink installed: yes") {
-		t.Fatalf("status output = %q, want command symlink yes", statusOut.String())
-	}
+	assertContains(t, statusOut.String(), "installed binary: yes")
+	assertContains(t, statusOut.String(), "command symlink installed: yes")
 
 	var uninstallOut bytes.Buffer
 	if err := runUninstall([]string{"--bin-dir", binDir, "--lib-dir", libDir}, &uninstallOut); err != nil {
 		t.Fatalf("runUninstall() error = %v", err)
 	}
-	if !strings.Contains(uninstallOut.String(), "removed command symlink") {
-		t.Fatalf("uninstall output = %q, want removed command symlink", uninstallOut.String())
-	}
-	if !strings.Contains(uninstallOut.String(), "hash -r") {
-		t.Fatalf("uninstall output = %q, want shell refresh guidance", uninstallOut.String())
-	}
-	if _, err := os.Lstat(link); !os.IsNotExist(err) {
-		t.Fatalf("command symlink still exists after uninstall: %v", err)
-	}
-	if _, err := os.Lstat(target); !os.IsNotExist(err) {
-		t.Fatalf("installed binary still exists after uninstall: %v", err)
-	}
+	assertContains(t, uninstallOut.String(), "removed command symlink")
+	assertContains(t, uninstallOut.String(), "hash -r")
+	assertPathsRemoved(t, link, target)
 }
 
 func TestInstallUsesDefaultHomeDirectories(t *testing.T) {
@@ -1050,52 +1023,30 @@ func TestShimInstallStatusAndUninstall(t *testing.T) {
 		t.Fatalf("runShim(install) error = %v", err)
 	}
 	shimPath := filepath.Join(binDir, "docker")
-	linkTarget, err := os.Readlink(shimPath)
-	if err != nil {
-		t.Fatalf("Readlink(shim) error = %v", err)
-	}
-	if linkTarget != installTarget {
-		t.Fatalf("shim target = %q, want %q", linkTarget, installTarget)
-	}
-	if _, err := os.Lstat(installTarget); err != nil {
-		t.Fatalf("envoyage install target missing before shim install: %v", err)
-	}
-	if !strings.Contains(installOut.String(), "installed shim") {
-		t.Fatalf("install output = %q, want installed shim", installOut.String())
-	}
+	assertSymlinkTarget(t, shimPath, installTarget)
+	assertPathExists(t, installTarget)
+	assertContains(t, installOut.String(), "installed shim")
 
 	var statusOut bytes.Buffer
 	if err := runShim([]string{"status", "--bin-dir", binDir}, &statusOut); err != nil {
 		t.Fatalf("runShim(status) error = %v", err)
 	}
-	if !strings.Contains(statusOut.String(), "installed: yes") {
-		t.Fatalf("status output = %q, want installed yes", statusOut.String())
-	}
-	if !strings.Contains(statusOut.String(), "shim target: "+installTarget) {
-		t.Fatalf("status output = %q, want shim target", statusOut.String())
-	}
+	assertContains(t, statusOut.String(), "installed: yes")
+	assertContains(t, statusOut.String(), "shim target: "+installTarget)
 
 	var secondInstallOut bytes.Buffer
 	if err := runShim([]string{"install", "--bin-dir", binDir}, &secondInstallOut); err != nil {
 		t.Fatalf("runShim(install existing) error = %v", err)
 	}
-	if !strings.Contains(secondInstallOut.String(), "shim already installed") {
-		t.Fatalf("second install output = %q, want already installed", secondInstallOut.String())
-	}
+	assertContains(t, secondInstallOut.String(), "shim already installed")
 
 	var uninstallOut bytes.Buffer
 	if err := runShim([]string{"uninstall", "--bin-dir", binDir}, &uninstallOut); err != nil {
 		t.Fatalf("runShim(uninstall) error = %v", err)
 	}
-	if !strings.Contains(uninstallOut.String(), "removed shim") {
-		t.Fatalf("uninstall output = %q, want removed shim", uninstallOut.String())
-	}
-	if !strings.Contains(uninstallOut.String(), "hash -r") {
-		t.Fatalf("uninstall output = %q, want shell refresh guidance", uninstallOut.String())
-	}
-	if _, err := os.Lstat(shimPath); !os.IsNotExist(err) {
-		t.Fatalf("shim still exists after uninstall: %v", err)
-	}
+	assertContains(t, uninstallOut.String(), "removed shim")
+	assertContains(t, uninstallOut.String(), "hash -r")
+	assertPathsRemoved(t, shimPath)
 }
 
 func TestShimInstallForceRecreatesExistingShim(t *testing.T) {
@@ -1428,8 +1379,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.2.1\n" {
-				t.Fatalf("version output = %q, want envoyage 0.2.1", output)
+			if output != "envoyage 0.3.0\n" {
+				t.Fatalf("version output = %q, want envoyage 0.3.0", output)
 			}
 		})
 	}
@@ -1442,6 +1393,88 @@ func TestRunVersionRejectsExtraArgs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "version does not accept arguments") {
 		t.Fatalf("error = %q, want extra argument error", err.Error())
+	}
+}
+
+func TestRunEnvExtractAndInline(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(`services:
+  app:
+    environment:
+      APP_ENV: production
+      DB_PASSWORD: secret-password
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(compose) error = %v", err)
+	}
+
+	var dryRunOut bytes.Buffer
+	if err := runEnv([]string{"extract"}, &dryRunOut); err != nil {
+		t.Fatalf("runEnv(extract) error = %v", err)
+	}
+	if !strings.Contains(dryRunOut.String(), "dry-run") {
+		t.Fatalf("extract output = %q, want dry-run guidance", dryRunOut.String())
+	}
+	if strings.Contains(dryRunOut.String(), "secret-password") {
+		t.Fatalf("extract output leaked secret: %q", dryRunOut.String())
+	}
+
+	var extractOut bytes.Buffer
+	if err := runEnv([]string{"extract", "--write"}, &extractOut); err != nil {
+		t.Fatalf("runEnv(extract write) error = %v", err)
+	}
+	if !strings.Contains(extractOut.String(), ".secrets.env") {
+		t.Fatalf("extract write output = %q, want secrets file section", extractOut.String())
+	}
+
+	var inlineOut bytes.Buffer
+	if err := runEnv([]string{"inline", "--out", "compose.inline.yaml"}, &inlineOut); err != nil {
+		t.Fatalf("runEnv(inline) error = %v", err)
+	}
+	if !strings.Contains(inlineOut.String(), "compose updates") {
+		t.Fatalf("inline output = %q, want compose updates", inlineOut.String())
+	}
+	rendered, err := os.ReadFile(filepath.Join(dir, "compose.inline.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(rendered) error = %v", err)
+	}
+	if !strings.Contains(string(rendered), "DB_PASSWORD: secret-password") {
+		t.Fatalf("rendered compose = %q, want inlined secret", rendered)
+	}
+}
+
+func TestRunEnvRejectsInvalidUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "unknown",
+			args: []string{"unknown"},
+			want: `unknown env command "unknown"`,
+		},
+		{
+			name: "extract positional",
+			args: []string{"extract", "extra"},
+			want: "env extract does not accept positional arguments",
+		},
+		{
+			name: "inline missing out",
+			args: []string{"inline"},
+			want: "--out is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runEnv(tt.args, &bytes.Buffer{})
+			if err == nil {
+				t.Fatal("runEnv() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
 	}
 }
 
@@ -1678,6 +1711,46 @@ func assertPathsRemoved(t *testing.T, paths ...string) {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists after uninstall: %v", path, err)
 		}
+	}
+}
+
+func assertPathExists(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("%s should exist: %v", path, err)
+	}
+}
+
+func assertFileContent(t *testing.T, path string, want string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("%s = %q, want %q", path, data, want)
+	}
+}
+
+func assertSymlinkTarget(t *testing.T, path string, want string) {
+	t.Helper()
+
+	target, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("Readlink(%s) error = %v", path, err)
+	}
+	if target != want {
+		t.Fatalf("%s target = %q, want %q", path, target, want)
+	}
+}
+
+func assertContains(t *testing.T, got string, want string) {
+	t.Helper()
+
+	if !strings.Contains(got, want) {
+		t.Fatalf("%q does not contain %q", got, want)
 	}
 }
 

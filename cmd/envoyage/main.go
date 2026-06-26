@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	version                  = "0.2.1"
+	version                  = "0.3.0"
 	defaultKeygenOutputPath  = compose.DefaultIdentityFile
 	defaultEncryptInputPath  = ".secrets.env"
 	defaultEncryptOutputPath = ".env.age"
@@ -66,6 +66,8 @@ func runEnvoyage(args []string) error {
 		return compose.RunCompose(context.Background(), args[1:])
 	case "completion":
 		return runCompletion(args[1:], os.Stdout)
+	case "env":
+		return runEnv(args[1:], os.Stdout)
 	case "install":
 		return runInstall(args[1:], os.Stdout)
 	case "encrypt":
@@ -334,6 +336,8 @@ Usage:
   envoyage encrypt [--in .secrets.env] [--out .env.age] [--identity age-key.txt]
   envoyage encrypt [--in .secrets.env] [--out .env.age] --recipient age1...
   envoyage decrypt [--in .env.age] [--out .secrets.env] [--identity age-key.txt]
+  envoyage env extract [--compose compose.yaml] [--write]
+  envoyage env inline --out compose.inline.yaml [--compose compose.yaml]
   envoyage completion bash|zsh|fish|powershell
   envoyage shim status|install|uninstall
   envoyage version
@@ -347,6 +351,8 @@ Examples:
   envoyage encrypt
   envoyage decrypt
   envoyage encrypt --in .secrets.env --out .env.age --identity age-key.txt
+  envoyage env extract
+  envoyage env inline --out compose.inline.yaml
   envoyage compose up -d
   envoyage compose --identity ./age-key.txt config
   envoyage compose --env-file custom.env --env-file custom.env.age config
