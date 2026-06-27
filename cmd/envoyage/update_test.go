@@ -17,7 +17,7 @@ import (
 )
 
 func TestUpdateCheckReportsLatest(t *testing.T) {
-	server := newUpdateTestServer(t, "0.4.1", releaseArchiveName("0.4.1", "linux", "amd64"), nil, nil)
+	server := newUpdateTestServer(t, "0.5.1", releaseArchiveName("0.5.1", "linux", "amd64"), nil, nil)
 	defer server.Close()
 
 	var out bytes.Buffer
@@ -33,7 +33,7 @@ func TestUpdateCheckReportsLatest(t *testing.T) {
 	}
 
 	output := out.String()
-	for _, want := range []string{"current: 0.4.0", "latest: 0.4.1", "up-to-date: no"} {
+	for _, want := range []string{"current: 0.5.0", "latest: 0.5.1", "up-to-date: no"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}

@@ -45,7 +45,7 @@ _envoyage()
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="compose completion decrypt encrypt env install keygen shim status uninstall update version"
+    commands="compose completion decrypt doctor encrypt env install keygen shim status uninstall update version"
 
     case "$prev" in
         --env-file|--identity|--in|--out|-o|-i|--bin-dir|--lib-dir)
@@ -72,6 +72,9 @@ _envoyage()
             ;;
         decrypt)
             flags="--in --out -o --identity -i --force"
+            ;;
+        doctor)
+            flags="--runtime"
             ;;
         encrypt)
             flags="--in --out -o --identity -i --recipient -r --force"
@@ -111,6 +114,7 @@ _envoyage() {
     'compose:run Docker Compose through Envoyage'
     'completion:generate shell completion script'
     'decrypt:decrypt .env.age to .secrets.env'
+    'doctor:check Envoyage and container runtime health'
     'encrypt:encrypt .secrets.env to .env.age'
     'env:extract or inline Compose environment values'
     'install:install Envoyage'
@@ -140,6 +144,9 @@ _envoyage() {
           ;;
         decrypt)
           _arguments '--in[encrypted age input path]:input:_files' '--out[plaintext dotenv output path]:output:_files' '-o[plaintext dotenv output path]:output:_files' '--identity[age identity path]:identity:_files' '-i[age identity path]:identity:_files' '--force[overwrite output file]'
+          ;;
+        doctor)
+          _arguments '--runtime[check Docker and Podman runtime packages]'
           ;;
         encrypt)
           _arguments '--in[plaintext dotenv input path]:input:_files' '--out[encrypted age output path]:output:_files' '-o[encrypted age output path]:output:_files' '--identity[age identity path]:identity:_files' '-i[age identity path]:identity:_files' '--recipient[age recipient]:recipient:' '-r[age recipient]:recipient:' '--force[overwrite output file]'
@@ -174,6 +181,7 @@ const fishCompletionScript = `# fish completion for envoyage
 complete -c envoyage -f -n "__fish_use_subcommand" -a "compose" -d "Run Docker Compose through Envoyage"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion script"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "decrypt" -d "Decrypt .env.age to .secrets.env"
+complete -c envoyage -f -n "__fish_use_subcommand" -a "doctor" -d "Check Envoyage and container runtime health"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "encrypt" -d "Encrypt .secrets.env to .env.age"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "env" -d "Extract or inline Compose environment values"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "install" -d "Install Envoyage"
@@ -191,6 +199,7 @@ complete -c envoyage -n "__fish_seen_subcommand_from decrypt" -l in -r -F -d "En
 complete -c envoyage -n "__fish_seen_subcommand_from decrypt" -l out -s o -r -F -d "Plaintext dotenv output path"
 complete -c envoyage -n "__fish_seen_subcommand_from decrypt" -l identity -s i -r -F -d "Age identity path"
 complete -c envoyage -n "__fish_seen_subcommand_from decrypt" -l force -d "Overwrite output file"
+complete -c envoyage -n "__fish_seen_subcommand_from doctor" -l runtime -d "Check Docker and Podman runtime packages"
 complete -c envoyage -n "__fish_seen_subcommand_from encrypt" -l in -r -F -d "Plaintext dotenv input path"
 complete -c envoyage -n "__fish_seen_subcommand_from encrypt" -l out -s o -r -F -d "Encrypted age output path"
 complete -c envoyage -n "__fish_seen_subcommand_from encrypt" -l identity -s i -r -F -d "Age identity path"
@@ -227,7 +236,7 @@ complete -c envoyage -n "__fish_seen_subcommand_from shim" -l force -d "Recreate
 const powershellCompletionScript = `# PowerShell completion for envoyage
 Register-ArgumentCompleter -Native -CommandName envoyage -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    $commands = @('compose','completion','decrypt','encrypt','env','install','keygen','shim','status','uninstall','update','version')
+    $commands = @('compose','completion','decrypt','doctor','encrypt','env','install','keygen','shim','status','uninstall','update','version')
     $tokens = $commandAst.CommandElements | ForEach-Object { $_.ToString() }
 
     if ($tokens.Count -le 2) {
@@ -242,6 +251,7 @@ Register-ArgumentCompleter -Native -CommandName envoyage -ScriptBlock {
         'compose' { @('--identity','--env-file','-f','-p','up','down','config','exec','logs','ps','pull','build','restart','stop') }
         'completion' { @('bash','zsh','fish','powershell') }
         'decrypt' { @('--in','--out','-o','--identity','-i','--force') }
+        'doctor' { @('--runtime') }
         'encrypt' { @('--in','--out','-o','--identity','-i','--recipient','-r','--force') }
         'env' { @('extract','inline','--compose','--write','--env','--secrets-env','--secrets','--out','-o','--env-file','--identity','-i','--force') }
         'install' { @('--system','--bin-dir','--lib-dir','--force') }

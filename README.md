@@ -72,7 +72,7 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The current Envoyage version is `0.4.0`.
+The current Envoyage version is `0.5.0`.
 
 Install the current binary into a user-local location:
 
@@ -150,6 +150,81 @@ To install a specific release:
 ```bash
 envoyage update --version 0.4.0
 ```
+
+## Doctor
+
+Envoyage can check the Envoyage install, installed container runtimes, and the
+current directory's Compose/env split:
+
+```bash
+envoyage doctor
+envoyage doctor --runtime
+```
+
+The default doctor command checks:
+
+- whether a newer Envoyage release is available
+- Docker and Podman installation paths, versions, and related runtime packages
+- whether the current directory's Compose file still has fixed environment
+  values that should be extracted to `.env` or `.secrets.env`
+- whether `.secrets.env` should be encrypted to `.env.age`
+
+`envoyage doctor --runtime` limits the check to the Docker/Podman runtime
+section.
+
+For runtime packages, Envoyage does not perform CVE matching. Instead, it uses
+package manager update metadata and makes a concrete recommendation when an
+update candidate is visible.
+
+Example output:
+
+```text
+Envoyage:
+  version: 0.5.0
+  latest: 0.5.1
+  update: update available
+  command: envoyage update
+
+Docker:
+  installed: yes
+  binary: /usr/bin/docker
+  version: 27.5.1
+  compose: v2.32.4
+  package manager: apt/dpkg
+  packages:
+    docker-ce: 27.5.1-1~ubuntu.24.04~noble -> 28.1.1-1~ubuntu.24.04~noble (update available)
+    docker-compose-plugin: 2.32.4-1~ubuntu.24.04~noble -> 2.33.0-1~ubuntu.24.04~noble (update available)
+  action: update recommended
+  command: sudo apt update && sudo apt install docker-ce docker-compose-plugin
+
+Project Env Check:
+  compose: compose.yaml
+  .env: found
+  .secrets.env: found
+  .env.age: missing
+  fixed env keys: APP_ENV
+  fixed secret keys: DB_PASSWORD
+  action: secret extraction recommended
+  command: envoyage env extract --write --secrets && envoyage encrypt
+```
+
+Doctor output prints key names only; it does not print dotenv values. If no
+Compose file is detected in the current directory, Envoyage skips env-split
+recommendations instead of treating unrelated local `.env` files as Compose
+project files.
+
+If no supported package manager is detected, Envoyage says that it cannot verify
+runtime package updates instead of guessing:
+
+```text
+action: unable to verify package updates
+reason: supported package manager not detected
+```
+
+Supported package manager checks:
+
+- Debian/Ubuntu-style systems: `apt-cache` and `dpkg-query`
+- Fedora/RHEL-style systems: `dnf` or `yum` with `rpm`
 
 ## Shell Completion
 
@@ -785,8 +860,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -795,8 +870,8 @@ files to GitHub Releases. `envoyage update` uses these release assets and
 refuses to install an archive that does not match `checksums.txt`.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.4.0` produces:
+`envoyage version`. For example, `v0.5.0` produces:
 
 ```text
-envoyage 0.4.0
+envoyage 0.5.0
 ```

@@ -1694,8 +1694,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.4.0\n" {
-				t.Fatalf("version output = %q, want envoyage 0.4.0", output)
+			if output != "envoyage 0.5.0\n" {
+				t.Fatalf("version output = %q, want envoyage 0.5.0", output)
 			}
 		})
 	}
@@ -1800,7 +1800,7 @@ func TestRunCompletionPrintsScripts(t *testing.T) {
 	}{
 		{
 			shell: "bash",
-			want:  []string{"complete -F _envoyage envoyage", "compose completion decrypt encrypt", "--system --bin-dir --lib-dir"},
+			want:  []string{"complete -F _envoyage envoyage", "compose completion decrypt doctor encrypt", "--system --bin-dir --lib-dir"},
 		},
 		{
 			shell: "zsh",
