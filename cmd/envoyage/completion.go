@@ -45,7 +45,7 @@ _envoyage()
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="compose completion decrypt encrypt env install keygen shim status uninstall version"
+    commands="compose completion decrypt encrypt env install keygen shim status uninstall update version"
 
     case "$prev" in
         --env-file|--identity|--in|--out|-o|-i|--bin-dir|--lib-dir)
@@ -91,6 +91,9 @@ _envoyage()
         status|uninstall)
             flags="--system --bin-dir --lib-dir"
             ;;
+        update)
+            flags="--check --version --system --bin-dir --lib-dir"
+            ;;
         *)
             flags=""
             ;;
@@ -115,6 +118,7 @@ _envoyage() {
     'shim:manage optional Docker/Podman shims'
     'status:show Envoyage install status'
     'uninstall:remove Envoyage install'
+    'update:update an Envoyage install from GitHub Releases'
     'version:print Envoyage version'
   )
 
@@ -155,6 +159,9 @@ _envoyage() {
         status|uninstall)
           _arguments '--system[use system-wide /usr/local paths]' '--bin-dir[command symlink directory]:directory:_files -/' '--lib-dir[binary install directory]:directory:_files -/'
           ;;
+        update)
+          _arguments '--check[check for an available update without installing it]' '--version[release version to install]:version:' '--system[use system-wide /usr/local paths]' '--bin-dir[command symlink directory]:directory:_files -/' '--lib-dir[binary install directory]:directory:_files -/'
+          ;;
       esac
       ;;
   esac
@@ -174,6 +181,7 @@ complete -c envoyage -f -n "__fish_use_subcommand" -a "keygen" -d "Generate an a
 complete -c envoyage -f -n "__fish_use_subcommand" -a "shim" -d "Manage optional Docker/Podman shims"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "status" -d "Show Envoyage install status"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "uninstall" -d "Remove Envoyage install"
+complete -c envoyage -f -n "__fish_use_subcommand" -a "update" -d "Update an Envoyage install from GitHub Releases"
 complete -c envoyage -f -n "__fish_use_subcommand" -a "version" -d "Print Envoyage version"
 
 complete -c envoyage -n "__fish_seen_subcommand_from completion" -f -a "bash zsh fish powershell"
@@ -202,6 +210,11 @@ complete -c envoyage -n "__fish_seen_subcommand_from install status uninstall" -
 complete -c envoyage -n "__fish_seen_subcommand_from install status uninstall" -l lib-dir -r -F -d "Binary install directory"
 complete -c envoyage -n "__fish_seen_subcommand_from install status uninstall" -l system -d "Use system-wide /usr/local paths"
 complete -c envoyage -n "__fish_seen_subcommand_from install" -l force -d "Overwrite Envoyage install"
+complete -c envoyage -n "__fish_seen_subcommand_from update" -l check -d "Check for an available update without installing it"
+complete -c envoyage -n "__fish_seen_subcommand_from update" -l version -r -d "Release version to install"
+complete -c envoyage -n "__fish_seen_subcommand_from update" -l bin-dir -r -F -d "Command symlink directory"
+complete -c envoyage -n "__fish_seen_subcommand_from update" -l lib-dir -r -F -d "Binary install directory"
+complete -c envoyage -n "__fish_seen_subcommand_from update" -l system -d "Use system-wide /usr/local paths"
 complete -c envoyage -n "__fish_seen_subcommand_from keygen" -l out -s o -r -F -d "Age identity output path"
 complete -c envoyage -n "__fish_seen_subcommand_from keygen" -l force -d "Overwrite identity file"
 complete -c envoyage -n "__fish_seen_subcommand_from shim" -f -a "status install uninstall"
@@ -214,7 +227,7 @@ complete -c envoyage -n "__fish_seen_subcommand_from shim" -l force -d "Recreate
 const powershellCompletionScript = `# PowerShell completion for envoyage
 Register-ArgumentCompleter -Native -CommandName envoyage -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    $commands = @('compose','completion','decrypt','encrypt','env','install','keygen','shim','status','uninstall','version')
+    $commands = @('compose','completion','decrypt','encrypt','env','install','keygen','shim','status','uninstall','update','version')
     $tokens = $commandAst.CommandElements | ForEach-Object { $_.ToString() }
 
     if ($tokens.Count -le 2) {
@@ -235,6 +248,7 @@ Register-ArgumentCompleter -Native -CommandName envoyage -ScriptBlock {
         'keygen' { @('--out','-o','--force') }
         'shim' { @('status','install','uninstall','--runtime','auto','docker','podman','all','--system','--bin-dir','--force') }
         { $_ -in @('status','uninstall') } { @('--system','--bin-dir','--lib-dir') }
+        'update' { @('--check','--version','--system','--bin-dir','--lib-dir') }
         default { @() }
     }
 
