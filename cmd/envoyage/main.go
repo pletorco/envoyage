@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	version                  = "0.4.0"
+	version                  = "0.5.0"
 	defaultKeygenOutputPath  = compose.DefaultIdentityFile
 	defaultEncryptInputPath  = ".secrets.env"
 	defaultEncryptOutputPath = ".env.age"
@@ -79,6 +79,8 @@ func runEnvoyage(args []string) error {
 		return compose.RunCompose(context.Background(), args[1:])
 	case "completion":
 		return runCompletion(args[1:], os.Stdout)
+	case "doctor":
+		return runDoctor(args[1:], os.Stdout)
 	case "env":
 		return runEnv(args[1:], os.Stdout)
 	case "install":
@@ -348,6 +350,7 @@ func printUsage() {
 
 Usage:
   envoyage compose [--identity PATH] [--env-file FILE...] [docker compose args...]
+  envoyage doctor [--runtime]
   envoyage install [--system] [--bin-dir ~/.local/bin] [--lib-dir ~/.local/lib/envoyage] [--force]
   envoyage uninstall [--system|--bin-dir ~/.local/bin --lib-dir ~/.local/lib/envoyage]
   envoyage update [--check] [--version VERSION] [--system]
@@ -364,6 +367,7 @@ Usage:
 
 Examples:
   envoyage version
+  envoyage doctor
   envoyage install
   envoyage update --check
   envoyage status

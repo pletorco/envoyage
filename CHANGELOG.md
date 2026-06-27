@@ -2,6 +2,17 @@
 
 All notable changes to Envoyage are documented in this file.
 
+## 0.5.0
+
+### Added
+
+- Added `envoyage doctor` for Docker/Podman runtime version checks and
+  package-manager based update recommendations.
+
+### Changed
+
+- Bumped the development version to `0.5.0`.
+
 ## 0.4.0
 
 ### Added
