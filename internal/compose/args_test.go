@@ -693,6 +693,9 @@ func TestFindRealDockerBinReportsMissingRealDocker(t *testing.T) {
 	if !strings.Contains(err.Error(), "ENVOYAGE_DOCKER_BIN") {
 		t.Fatalf("error = %q, want ENVOYAGE_DOCKER_BIN guidance", err.Error())
 	}
+	if !strings.Contains(err.Error(), "envoyage shim status --runtime docker") {
+		t.Fatalf("error = %q, want shim status hint", err.Error())
+	}
 }
 
 func TestFindRealRuntimeBinSupportsPodman(t *testing.T) {
@@ -736,6 +739,9 @@ func TestFindRealRuntimeBinReportsMissingPodman(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ENVOYAGE_PODMAN_BIN") {
 		t.Fatalf("error = %q, want ENVOYAGE_PODMAN_BIN guidance", err.Error())
+	}
+	if !strings.Contains(err.Error(), "envoyage shim status --runtime podman") {
+		t.Fatalf("error = %q, want shim status hint", err.Error())
 	}
 }
 
@@ -786,6 +792,9 @@ func TestRunComposeReturnsParseAndLoadErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "--env-file requires a value") {
 		t.Fatalf("parse error = %q, want env-file guidance", err.Error())
 	}
+	if !strings.Contains(err.Error(), "load .env and .env.age automatically") {
+		t.Fatalf("parse error = %q, want automatic loading hint", err.Error())
+	}
 
 	err = RunCompose(context.Background(), []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), "config"})
 	if err == nil {
@@ -793,6 +802,9 @@ func TestRunComposeReturnsParseAndLoadErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read env file") {
 		t.Fatalf("load error = %q, want read env file", err.Error())
+	}
+	if !strings.Contains(err.Error(), "check the --env-file path") {
+		t.Fatalf("load error = %q, want env-file path hint", err.Error())
 	}
 }
 

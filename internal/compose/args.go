@@ -30,7 +30,7 @@ func ParseArgs(args []string) (Options, error) {
 		switch {
 		case arg == "--env-file":
 			if i+1 >= len(args) {
-				return Options{}, fmt.Errorf("--env-file requires a value")
+				return Options{}, fmt.Errorf("--env-file requires a value\n\nhint:\n  use --env-file .env.age or omit it to load .env and .env.age automatically")
 			}
 			i++
 			opts.EnvFiles = append(opts.EnvFiles, args[i])
@@ -38,7 +38,7 @@ func ParseArgs(args []string) (Options, error) {
 			opts.EnvFiles = append(opts.EnvFiles, strings.TrimPrefix(arg, "--env-file="))
 		case arg == "--identity":
 			if i+1 >= len(args) {
-				return Options{}, fmt.Errorf("--identity requires a value")
+				return Options{}, fmt.Errorf("--identity requires a value\n\nhint:\n  pass --identity /path/to/age-key.txt or set AGE_IDENTITY_FILE")
 			}
 			i++
 			opts.IdentityFile = args[i]
@@ -101,13 +101,13 @@ func LoadEnvFiles(paths []string, identityPath string) (map[string]string, error
 func loadEnvFile(path string, identityPath string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read env file %s: %w", path, err)
+		return nil, fmt.Errorf("read env file %s: %w\n\nhint:\n  check the --env-file path\n  or omit --env-file to load existing .env and .env.age automatically", path, err)
 	}
 
 	if strings.HasSuffix(path, ".age") {
 		env, err := ageenv.Decrypt(data, identityPath)
 		if err != nil {
-			return nil, fmt.Errorf("load encrypted env file %s: %w", path, err)
+			return nil, fmt.Errorf("load encrypted env file %s: %w\n\nhint:\n  pass --identity /path/to/age-key.txt\n  or set AGE_IDENTITY_FILE=/path/to/age-key.txt", path, err)
 		}
 		return env, nil
 	}

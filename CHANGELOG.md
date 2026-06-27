@@ -2,6 +2,18 @@
 
 All notable changes to Envoyage are documented in this file.
 
+## 0.3.1
+
+### Added
+
+- Added `task version` and `task version:bump` for guarded project version
+  management.
+- Added actionable recovery hints for common configuration errors.
+
+### Changed
+
+- Bumped the development version to `0.3.1`.
+
 ## 0.3.0
 
 ### Added

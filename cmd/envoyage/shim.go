@@ -133,7 +133,7 @@ func installRuntimeShim(runtimeName string, request shimInstallRequest) (bool, e
 		return false, err
 	}
 	if err := mkdirAll(filepath.Dir(shimPath), 0o755); err != nil {
-		return false, fmt.Errorf("create shim directory %s: %w", filepath.Dir(shimPath), err)
+		return false, fmt.Errorf("create shim directory %s: %w%s", filepath.Dir(shimPath), err, shimPermissionHint())
 	}
 
 	shouldInstall, err := prepareShimInstall(runtimeName, shimPath, request.Target, request.ManagedTargets, request.Force, request.Stdout)
@@ -163,10 +163,10 @@ func ensureShimEnvoyageInstall(paths installPaths, force bool, stdout io.Writer)
 		return err
 	}
 	if err := mkdirAll(paths.LibDir, 0o755); err != nil {
-		return fmt.Errorf("create install directory %s: %w", paths.LibDir, err)
+		return fmt.Errorf("create install directory %s: %w%s", paths.LibDir, err, shimPermissionHint())
 	}
 	if err := mkdirAll(paths.BinDir, 0o755); err != nil {
-		return fmt.Errorf("create command directory %s: %w", paths.BinDir, err)
+		return fmt.Errorf("create command directory %s: %w%s", paths.BinDir, err, shimPermissionHint())
 	}
 
 	info, err := os.Lstat(paths.Target)
@@ -212,7 +212,7 @@ func prepareShimInstall(runtimeName string, shimPath string, target string, mana
 	}
 
 	if _, err := os.Lstat(shimPath); err == nil {
-		return false, fmt.Errorf("refusing to overwrite non-Envoyage %s at %s", runtimeName, shimPath)
+		return false, fmt.Errorf("refusing to overwrite non-Envoyage %s at %s\n\nhint:\n  choose another --bin-dir that appears earlier in PATH\n  or remove the existing %s command manually if it is safe", runtimeName, shimPath, runtimeName)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("inspect shim path %s: %w", shimPath, err)
 	}
@@ -313,7 +313,7 @@ func uninstallShimPath(runtimeName string, shimPath string, managedTargets []str
 			fmt.Fprintf(stdout, "shim not installed: %s\n", shimPath)
 			return nil
 		}
-		return fmt.Errorf("refusing to remove non-Envoyage %s at %s", runtimeName, shimPath)
+		return fmt.Errorf("refusing to remove non-Envoyage %s at %s\n\nhint:\n  Envoyage only removes shim symlinks it manages; inspect this path manually before deleting it", runtimeName, shimPath)
 	}
 
 	if err := os.Remove(shimPath); err != nil {
@@ -446,7 +446,7 @@ func runtimeShimPathForMode(runtimeName string, binDir string, system bool, binD
 
 func validateShimPathMode(system bool, binDirProvided bool) error {
 	if system && binDirProvided {
-		return fmt.Errorf("--system cannot be combined with --bin-dir")
+		return fmt.Errorf("--system cannot be combined with --bin-dir\n\nhint:\n  use either --system for /usr/local/bin or --bin-dir for a custom shim directory, not both")
 	}
 	return nil
 }
@@ -492,7 +492,7 @@ func shimInstallRuntimes(runtimeName string, binDir string, system bool, binDirP
 			}
 		}
 		if len(detected) == 0 {
-			return nil, fmt.Errorf("no supported runtime found for shim install; install docker or podman, or pass --runtime docker|podman|all")
+			return nil, fmt.Errorf("no supported runtime found for shim install; install docker or podman, or pass --runtime docker|podman|all\n\nhint:\n  set ENVOYAGE_DOCKER_BIN=/usr/bin/docker or ENVOYAGE_PODMAN_BIN=/usr/bin/podman when the runtime is outside PATH")
 		}
 		return detected, nil
 	default:
@@ -641,4 +641,8 @@ func printShimUsage(stdout io.Writer) {
   envoyage shim status [--runtime auto|docker|podman|all] [--system] [--bin-dir ~/.local/bin]
   envoyage shim install [--runtime auto|docker|podman|all] [--system] [--bin-dir ~/.local/bin] [--force]
   envoyage shim uninstall [--runtime auto|docker|podman|all] [--system|--bin-dir ~/.local/bin]`)
+}
+
+func shimPermissionHint() string {
+	return "\n\nhint:\n  for system-wide shim install, retry with sudo envoyage shim install --system\n  or use a user-local shim with: envoyage shim install"
 }

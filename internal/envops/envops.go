@@ -107,7 +107,7 @@ func Extract(opts ExtractOptions) (Result, error) {
 
 func Inline(opts InlineOptions) (Result, error) {
 	if opts.OutputPath == "" {
-		return Result{}, fmt.Errorf("--out is required")
+		return Result{}, fmt.Errorf("--out is required\n\nhint:\n  write rendered compose output to a separate file, for example: envoyage env inline --out compose.inline.yaml")
 	}
 
 	composePath, err := resolveComposePath(opts.ComposePath)
@@ -115,7 +115,7 @@ func Inline(opts InlineOptions) (Result, error) {
 		return Result{}, err
 	}
 	if sameCleanPath(composePath, opts.OutputPath) {
-		return Result{}, fmt.Errorf("--out must be different from the source compose file")
+		return Result{}, fmt.Errorf("--out must be different from the source compose file\n\nhint:\n  inline output may contain plaintext secrets; use a separate file such as compose.inline.yaml")
 	}
 
 	envFiles := opts.EnvFiles
@@ -167,10 +167,10 @@ func resolveComposePath(path string) (string, error) {
 		}
 	}
 	if len(found) == 0 {
-		return "", fmt.Errorf("compose file not found; pass --compose PATH")
+		return "", fmt.Errorf("compose file not found; pass --compose PATH\n\nhint:\n  supported default names are compose.yaml, compose.yml, docker-compose.yaml, and docker-compose.yml")
 	}
 	if len(found) > 1 {
-		return "", fmt.Errorf("multiple compose files found; pass --compose PATH")
+		return "", fmt.Errorf("multiple compose files found; pass --compose PATH\n\nhint:\n  choose the source file explicitly, for example: envoyage env extract --compose compose.yaml")
 	}
 	return found[0], nil
 }
@@ -204,7 +204,7 @@ func writeComposeDocument(path string, doc *yaml.Node, mode os.FileMode, force b
 	if !force {
 		flag = os.O_WRONLY | os.O_CREATE | os.O_EXCL
 		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("output file %s already exists; pass --force to overwrite it", path)
+			return fmt.Errorf("output file %s already exists; pass --force to overwrite it\n\nhint:\n  inline output may contain plaintext secrets; verify the target path before using --force", path)
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("inspect output file %s: %w", path, err)
 		}
@@ -378,7 +378,7 @@ func inlineRawValue(value string, env map[string]string) (string, bool) {
 func addPlannedValue(planned map[string]plannedValue, key string, value string, secret bool) error {
 	if existing, ok := planned[key]; ok {
 		if existing.Value != value {
-			return fmt.Errorf("conflicting values for key %s", key)
+			return fmt.Errorf("conflicting values for key %s\n\nhint:\n  use distinct environment variable names or make the fixed Compose values match before extracting", key)
 		}
 		existing.Secret = existing.Secret || secret
 		planned[key] = existing
@@ -453,7 +453,7 @@ func missingEnvKeys(path string, existing map[string]string, values map[string]s
 			continue
 		}
 		if existingValue != values[key] {
-			return nil, fmt.Errorf("existing env file %s has a different value for key %s", path, key)
+			return nil, fmt.Errorf("existing env file %s has a different value for key %s\n\nhint:\n  update the existing env file manually or remove that key before running env extract --write", path, key)
 		}
 	}
 	return missing, nil

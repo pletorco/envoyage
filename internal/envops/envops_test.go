@@ -202,6 +202,9 @@ func TestResolveComposePathRejectsAmbiguousDefaults(t *testing.T) {
 	if !strings.Contains(err.Error(), "multiple compose files") {
 		t.Fatalf("error = %q, want multiple compose files", err.Error())
 	}
+	if !strings.Contains(err.Error(), "envoyage env extract --compose compose.yaml") {
+		t.Fatalf("error = %q, want compose selection hint", err.Error())
+	}
 }
 
 func writeFile(t *testing.T, path string, content string) {

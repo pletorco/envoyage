@@ -155,7 +155,8 @@ func FindRealRuntimeBin(runtimeName string, invokedPath string) (string, error) 
 		return candidate, nil
 	}
 
-	return "", fmt.Errorf("real %s binary not found for shim mode; set %s=/path/to/%s", runtimeName, runtimeBinEnv(runtimeName), runtimeName)
+	envName := runtimeBinEnv(runtimeName)
+	return "", fmt.Errorf("real %s binary not found for shim mode; set %s=/path/to/%s\n\nhint:\n  install %s or set %s to its absolute path\n  inspect shim resolution with: envoyage shim status --runtime %s", runtimeName, envName, runtimeName, runtimeName, envName, runtimeName)
 }
 
 func RuntimeBinEnv(runtimeName string) string {

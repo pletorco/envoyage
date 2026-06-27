@@ -3,7 +3,7 @@ version: '3'
 vars:
   BINARY: envoyage
   MAIN: ./cmd/envoyage
-  VERSION: 0.3.0
+  VERSION: 0.3.1
 
 tasks:
   default:
@@ -31,6 +31,62 @@ tasks:
     desc: Run fake-runtime end-to-end tests
     cmds:
       - go test ./test/e2e
+
+  version:
+    desc: Print the current project version
+    cmds:
+      - |
+        awk '/^  VERSION:/ { print $2; exit }' Taskfile.yml
+
+  version:bump:
+    desc: Bump VERSION to the next patch version, or validate VERSION=x.y.z as the next patch/minor/major
+    cmds:
+      - |
+        set -eu
+        current="$(awk '/^  VERSION:/ { print $2; exit }' Taskfile.yml)"
+        requested="${VERSION:-}"
+        if [ -z "$requested" ]; then
+          requested="$(awk -F. -v v="$current" 'BEGIN { split(v, p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }')"
+        fi
+
+        if ! printf '%s\n' "$current" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "invalid current VERSION: $current" >&2
+          exit 1
+        fi
+        if ! printf '%s\n' "$requested" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "invalid VERSION: $requested" >&2
+          exit 1
+        fi
+
+        old_major="${current%%.*}"
+        rest="${current#*.}"
+        old_minor="${rest%%.*}"
+        old_patch="${rest#*.}"
+
+        new_major="${requested%%.*}"
+        rest="${requested#*.}"
+        new_minor="${rest%%.*}"
+        new_patch="${rest#*.}"
+
+        patch_next="$old_major.$old_minor.$((old_patch + 1))"
+        minor_next="$old_major.$((old_minor + 1)).0"
+        major_next="$((old_major + 1)).0.0"
+        if [ "$requested" != "$patch_next" ] && [ "$requested" != "$minor_next" ] && [ "$requested" != "$major_next" ]; then
+          echo "invalid VERSION bump: $current -> $requested" >&2
+          echo "allowed: $patch_next, $minor_next, $major_next" >&2
+          exit 1
+        fi
+
+        sed -i \
+          -e "s/VERSION: $current/VERSION: $requested/" \
+          -e "s/version                  = \"$current\"/version                  = \"$requested\"/" \
+          -e "s/envoyage $current/envoyage $requested/g" \
+          -e "s/want envoyage $current/want envoyage $requested/g" \
+          -e "s/The current Envoyage version is \`$current\`./The current Envoyage version is \`$requested\`./" \
+          -e "s/v$current/v$requested/g" \
+          Taskfile.yml cmd/envoyage/main.go cmd/envoyage/main_test.go README.md
+
+        printf 'bumped version: %s -> %s\n' "$current" "$requested"
 
   coverage:
     desc: Run tests and write Go coverage profile for Sonar

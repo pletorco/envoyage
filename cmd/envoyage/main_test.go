@@ -1349,6 +1349,7 @@ func TestShimRefusesNonEnvoyageDocker(t *testing.T) {
 	if !strings.Contains(err.Error(), "refusing to overwrite non-Envoyage docker") {
 		t.Fatalf("install error = %q, want overwrite refusal", err.Error())
 	}
+	assertContains(t, err.Error(), "choose another --bin-dir")
 
 	err = runShim([]string{"uninstall", "--runtime", "docker", "--bin-dir", binDir}, &bytes.Buffer{})
 	if err == nil {
@@ -1357,6 +1358,7 @@ func TestShimRefusesNonEnvoyageDocker(t *testing.T) {
 	if !strings.Contains(err.Error(), "refusing to remove non-Envoyage docker") {
 		t.Fatalf("uninstall error = %q, want remove refusal", err.Error())
 	}
+	assertContains(t, err.Error(), "only removes shim symlinks it manages")
 }
 
 func TestShimRefusesNonEnvoyagePodman(t *testing.T) {
@@ -1692,8 +1694,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.3.0\n" {
-				t.Fatalf("version output = %q, want envoyage 0.3.0", output)
+			if output != "envoyage 0.3.1\n" {
+				t.Fatalf("version output = %q, want envoyage 0.3.1", output)
 			}
 		})
 	}

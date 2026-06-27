@@ -60,10 +60,10 @@ func runInstall(args []string, stdout io.Writer) error {
 	}
 
 	if err := mkdirAll(paths.LibDir, 0o755); err != nil {
-		return fmt.Errorf("create install directory %s: %w", paths.LibDir, err)
+		return fmt.Errorf("create install directory %s: %w%s", paths.LibDir, err, installPermissionHint())
 	}
 	if err := mkdirAll(paths.BinDir, 0o755); err != nil {
-		return fmt.Errorf("create command directory %s: %w", paths.BinDir, err)
+		return fmt.Errorf("create command directory %s: %w%s", paths.BinDir, err, installPermissionHint())
 	}
 	if err := installEnvoyageBinary(source, paths.Target, force); err != nil {
 		return err
@@ -190,7 +190,7 @@ func runStatus(args []string, stdout io.Writer) error {
 func resolveInstallPathsForMode(binDir string, libDir string, system bool, binDirProvided bool, libDirProvided bool) (installPaths, error) {
 	if system {
 		if binDirProvided || libDirProvided {
-			return installPaths{}, fmt.Errorf("--system cannot be combined with --bin-dir or --lib-dir")
+			return installPaths{}, fmt.Errorf("--system cannot be combined with --bin-dir or --lib-dir\n\nhint:\n  use either --system for /usr/local paths or explicit --bin-dir/--lib-dir paths, not both")
 		}
 		binDir = defaultSystemInstallBinDir
 		libDir = defaultSystemInstallLibDir
@@ -200,10 +200,10 @@ func resolveInstallPathsForMode(binDir string, libDir string, system bool, binDi
 
 func resolveInstallPaths(binDir string, libDir string) (installPaths, error) {
 	if binDir == "" {
-		return installPaths{}, fmt.Errorf("--bin-dir is required")
+		return installPaths{}, fmt.Errorf("--bin-dir is required\n\nhint:\n  omit --bin-dir to use ~/.local/bin or pass --system for /usr/local/bin")
 	}
 	if libDir == "" {
-		return installPaths{}, fmt.Errorf("--lib-dir is required")
+		return installPaths{}, fmt.Errorf("--lib-dir is required\n\nhint:\n  omit --lib-dir to use ~/.local/lib/envoyage or pass --system for /usr/local/lib/envoyage")
 	}
 
 	resolvedBinDir, err := expandHomePath(binDir)
@@ -230,9 +230,9 @@ func installEnvoyageBinary(source string, target string, force bool) error {
 	info, err := os.Lstat(target)
 	switch {
 	case err == nil && info.IsDir():
-		return fmt.Errorf("refusing to overwrite directory at install target %s", target)
+		return fmt.Errorf("refusing to overwrite directory at install target %s\n\nhint:\n  choose another --lib-dir or remove the directory manually after verifying it is safe", target)
 	case err == nil && !force:
-		return fmt.Errorf("install target already exists at %s; pass --force to replace it", target)
+		return fmt.Errorf("install target already exists at %s; pass --force to replace it\n\nhint:\n  use --force only when this file is an Envoyage binary you intend to replace", target)
 	case err != nil && !errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("inspect install target %s: %w", target, err)
 	}
@@ -254,7 +254,7 @@ func installEnvoyageSymlink(link string, target string, force bool, stdout io.Wr
 			return fmt.Errorf("remove existing command symlink %s: %w", link, err)
 		}
 	} else if _, err := os.Lstat(link); err == nil {
-		return fmt.Errorf("refusing to overwrite non-Envoyage command at %s", link)
+		return fmt.Errorf("refusing to overwrite non-Envoyage command at %s\n\nhint:\n  choose another --bin-dir or remove the existing command manually if it is safe", link)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect command symlink %s: %w", link, err)
 	}
@@ -282,7 +282,7 @@ func uninstallEnvoyageSymlink(link string, target string, stdout io.Writer) erro
 		fmt.Fprintf(stdout, "command symlink not installed: %s\n", link)
 		return nil
 	}
-	return fmt.Errorf("refusing to remove non-Envoyage command at %s", link)
+	return fmt.Errorf("refusing to remove non-Envoyage command at %s\n\nhint:\n  Envoyage only removes symlinks it manages; inspect this path manually before deleting it", link)
 }
 
 func uninstallEnvoyageBinary(target string, stdout io.Writer) error {
@@ -295,7 +295,7 @@ func uninstallEnvoyageBinary(target string, stdout io.Writer) error {
 		return fmt.Errorf("inspect installed binary %s: %w", target, err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("refusing to remove directory at install target %s", target)
+		return fmt.Errorf("refusing to remove directory at install target %s\n\nhint:\n  Envoyage only removes its installed binary file; inspect this directory manually", target)
 	}
 	if err := os.Remove(target); err != nil {
 		return fmt.Errorf("remove installed binary %s: %w", target, err)
@@ -381,6 +381,10 @@ func printInstallActivation(stdout io.Writer, binDir string) {
 	fmt.Fprintln(stdout, "To activate envoyage:")
 	fmt.Fprintf(stdout, "  export PATH=%q:$PATH\n", binDir)
 	printHashCommand(stdout)
+}
+
+func installPermissionHint() string {
+	return "\n\nhint:\n  for system-wide install, retry with sudo envoyage install --system\n  or use the default user-local install with: envoyage install"
 }
 
 func printShellHashRefresh(stdout io.Writer) {

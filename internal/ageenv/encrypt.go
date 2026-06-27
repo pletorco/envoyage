@@ -25,15 +25,15 @@ type GeneratedIdentity struct {
 // EncryptFile encrypts a dotenv file to age format without logging plaintext.
 func EncryptFile(opts EncryptOptions) error {
 	if opts.InputPath == "" {
-		return fmt.Errorf("--in is required")
+		return fmt.Errorf("--in is required\n\nhint:\n  pass --in .secrets.env or place plaintext secrets at .secrets.env")
 	}
 	if opts.OutputPath == "" {
-		return fmt.Errorf("--out is required")
+		return fmt.Errorf("--out is required\n\nhint:\n  pass --out .env.age to choose where encrypted secrets are written")
 	}
 
 	plaintext, err := os.ReadFile(opts.InputPath)
 	if err != nil {
-		return fmt.Errorf("read input env file %s: %w", opts.InputPath, err)
+		return fmt.Errorf("read input env file %s: %w\n\nhint:\n  create plaintext secrets at .secrets.env\n  or pass --in PATH to select a different input file", opts.InputPath, err)
 	}
 
 	recipients, err := loadRecipients(opts.Recipients, opts.IdentityPaths)
@@ -41,7 +41,7 @@ func EncryptFile(opts EncryptOptions) error {
 		return err
 	}
 	if len(recipients) == 0 {
-		return fmt.Errorf("at least one --recipient or --identity is required")
+		return fmt.Errorf("at least one --recipient or --identity is required%s", identityHint())
 	}
 
 	var encrypted bytes.Buffer
@@ -62,7 +62,7 @@ func EncryptFile(opts EncryptOptions) error {
 	}
 	file, err := os.OpenFile(opts.OutputPath, flag, 0o600)
 	if err != nil {
-		return fmt.Errorf("create output env file %s: %w", opts.OutputPath, err)
+		return fmt.Errorf("create output env file %s: %w\n\nhint:\n  pass --force to overwrite an existing encrypted env file\n  or pass --out PATH to choose another output path", opts.OutputPath, err)
 	}
 	defer file.Close()
 
@@ -75,7 +75,7 @@ func EncryptFile(opts EncryptOptions) error {
 // GenerateIdentityFile writes a new age identity file and returns its recipient.
 func GenerateIdentityFile(path string, forceOverwrite bool) (GeneratedIdentity, error) {
 	if path == "" {
-		return GeneratedIdentity{}, fmt.Errorf("--out is required")
+		return GeneratedIdentity{}, fmt.Errorf("--out is required\n\nhint:\n  pass --out /path/to/age-key.txt or use the default with: sudo envoyage keygen")
 	}
 
 	identity, err := age.GenerateX25519Identity()
@@ -89,7 +89,7 @@ func GenerateIdentityFile(path string, forceOverwrite bool) (GeneratedIdentity, 
 	}
 	file, err := os.OpenFile(path, flag, 0o600)
 	if err != nil {
-		return GeneratedIdentity{}, fmt.Errorf("create identity file %s: %w", path, err)
+		return GeneratedIdentity{}, fmt.Errorf("create identity file %s: %w\n\nhint:\n  pass --force to overwrite an existing identity file\n  or pass --out PATH to choose another identity path", path, err)
 	}
 	defer file.Close()
 

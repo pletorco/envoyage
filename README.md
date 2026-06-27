@@ -72,7 +72,7 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The current Envoyage version is `0.3.0`.
+The current Envoyage version is `0.3.1`.
 
 Install the current binary into a user-local location:
 
@@ -692,6 +692,8 @@ With [go-task](https://taskfile.dev/):
 ```bash
 task check
 task build
+task version
+task version:bump
 task test
 task test:e2e
 task coverage
@@ -701,6 +703,17 @@ task sonar
 ```
 
 `task build` embeds the version from `Taskfile.yml` into the binary.
+
+`task version` prints the current project version. `task version:bump` bumps to
+the next patch version by default. To choose the next allowed patch, minor, or
+major version explicitly, pass `VERSION`:
+
+```bash
+task version:bump
+VERSION=0.3.2 task version:bump
+VERSION=0.4.0 task version:bump
+VERSION=1.0.0 task version:bump
+```
 
 `task test:e2e` builds a temporary Envoyage binary and runs end-to-end tests
 against fake Docker and Podman runtime scripts. It does not require a Docker or
@@ -743,8 +756,8 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
@@ -752,8 +765,8 @@ and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
 files to GitHub Releases.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.3.0` produces:
+`envoyage version`. For example, `v0.3.1` produces:
 
 ```text
-envoyage 0.3.0
+envoyage 0.3.1
 ```
