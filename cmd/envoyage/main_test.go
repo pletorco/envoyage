@@ -1694,8 +1694,8 @@ func TestRunPrintsVersion(t *testing.T) {
 				}
 			})
 
-			if output != "envoyage 0.3.1\n" {
-				t.Fatalf("version output = %q, want envoyage 0.3.1", output)
+			if output != "envoyage 0.4.0\n" {
+				t.Fatalf("version output = %q, want envoyage 0.4.0", output)
 			}
 		})
 	}

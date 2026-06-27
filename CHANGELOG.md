@@ -2,6 +2,17 @@
 
 All notable changes to Envoyage are documented in this file.
 
+## 0.4.0
+
+### Added
+
+- Added `envoyage update` for GitHub Releases based self-updates with
+  `checksums.txt` verification.
+
+### Changed
+
+- Bumped the development version to `0.4.0`.
+
 ## 0.3.1
 
 ### Added

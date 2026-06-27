@@ -72,7 +72,7 @@ go build ./cmd/envoyage
 ./envoyage version
 ```
 
-The current Envoyage version is `0.3.1`.
+The current Envoyage version is `0.4.0`.
 
 Install the current binary into a user-local location:
 
@@ -121,6 +121,35 @@ and an existing Envoyage install is only replaced with `--force`.
 If your current shell still tries an older path such as
 `~/.local/bin/envoyage`, refresh the shell command cache with `hash -r` or open a
 new shell.
+
+## Update
+
+Envoyage can update an existing Envoyage-managed install from GitHub Releases:
+
+```bash
+envoyage update --check
+envoyage update
+```
+
+For a system-wide install:
+
+```bash
+sudo envoyage update --system
+hash -r
+```
+
+`envoyage update` fetches release metadata from the
+`pletorco/envoyage` GitHub repository, downloads the platform archive for the
+current OS and CPU architecture, verifies it against `checksums.txt`, then
+replaces the installed Envoyage binary. It expects Envoyage to have been
+installed first with `envoyage install`; it does not overwrite arbitrary
+binaries outside Envoyage-managed install paths.
+
+To install a specific release:
+
+```bash
+envoyage update --version 0.4.0
+```
 
 ## Shell Completion
 
@@ -710,8 +739,8 @@ major version explicitly, pass `VERSION`:
 
 ```bash
 task version:bump
-VERSION=0.3.2 task version:bump
-VERSION=0.4.0 task version:bump
+VERSION=0.4.1 task version:bump
+VERSION=0.5.0 task version:bump
 VERSION=1.0.0 task version:bump
 ```
 
@@ -756,17 +785,18 @@ git status --short
 Create and push a tag:
 
 ```bash
-git tag v0.3.1
-git push origin v0.3.1
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 Pushing the tag runs the release workflow. It builds archives for Linux, macOS,
 and Windows on `amd64` and `arm64`, writes `checksums.txt`, and publishes the
-files to GitHub Releases.
+files to GitHub Releases. `envoyage update` uses these release assets and
+refuses to install an archive that does not match `checksums.txt`.
 
 The workflow strips the leading `v` and embeds the tag version into
-`envoyage version`. For example, `v0.3.1` produces:
+`envoyage version`. For example, `v0.4.0` produces:
 
 ```text
-envoyage 0.3.1
+envoyage 0.4.0
 ```
